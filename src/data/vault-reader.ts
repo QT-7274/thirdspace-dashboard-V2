@@ -1,6 +1,18 @@
 import type { App, TFile } from "obsidian";
 
-// ── Date helpers ─────────────────────────────────────────────
+// ── Local date helpers（讀系統時區，不硬編碼）────────────────────
+// sv-SE locale 的格式恰好是 YYYY-MM-DD / HH:MM:SS，且跟隨系統時區
+const _dateFmt = new Intl.DateTimeFormat("sv-SE");
+const _tsFmt   = new Intl.DateTimeFormat("sv-SE", {
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
+
+export function localDateStr(d: Date): string     { return _dateFmt.format(d); }             // "2026-05-27"
+export function localDateCompact(d: Date): string { return _dateFmt.format(d).replace(/-/g,""); } // "20260527"
+export function localTimestamp(d: Date): string   { return _tsFmt.format(d).replace(",",""); }    // "2026-05-27 14:30:00"
+
+// ── Frontmatter date helpers ──────────────────────────────────
 function parseFmDate(s: unknown): number {
   if (!s || typeof s !== "string") return 0;
   try { return new Date(s.replace(" ", "T")).getTime() || 0; } catch { return 0; }
@@ -51,7 +63,7 @@ const WEEKDAYS = ["日","一","二","三","四","五","六"];
 // ── Worklog path helper ──────────────────────────────────────
 export function getTodayWorklogPath(): string {
   const now = new Date();
-  const ymd = now.toISOString().slice(0,10).replace(/-/g,"");
+  const ymd = localDateCompact(now);
   return `02-日记/工作日志/${ymd}_工作日志_周${WEEKDAYS[now.getDay()]}.md`;
 }
 
@@ -102,7 +114,7 @@ export async function getDailyActivity(app: App, days = 365): Promise<DailyActiv
     if (shouldSkip(f)) continue;
     const ts = fileCreated(app, f);
     if (ts < cutoff) continue;
-    const date = new Date(ts).toISOString().slice(0,10);
+    const date = localDateStr(new Date(ts));
     countMap[date] = (countMap[date] ?? 0) + 1;
   }
   return Object.entries(countMap).map(([date,count])=>({date,count})).sort((a,b)=>a.date.localeCompare(b.date));
@@ -118,7 +130,7 @@ export function getVaultStats(app: App): VaultStats {
     const ts = fileCreated(app, f);
     if (ts > weekAgo)  week++;
     if (ts > monthAgo) month++;
-    if (ts > now - 365 * 86_400_000) daySet.add(new Date(ts).toISOString().slice(0,10));
+    if (ts > now - 365 * 86_400_000) daySet.add(localDateStr(new Date(ts)));
   }
   return { total: files.length, thisWeek: week, thisMonth: month, activeDays: daySet.size };
 }
@@ -190,9 +202,9 @@ export async function addTodoToWorklog(app: App, text: string): Promise<void> {
   let f = app.vault.getAbstractFileByPath(path) as TFile | null;
   if (!f) {
     const now = new Date();
-    const ts  = now.toISOString().slice(0,19).replace("T"," ");
+    const ts  = localTimestamp(now);
     const wd  = WEEKDAYS[now.getDay()];
-    const ds  = now.toISOString().slice(0,10);
+    const ds  = localDateStr(now);
     const tpl = `---\ntitle: "${ds} 周${wd} 工作日志"\ntype: "worklog"\ntopic: "work"\nworkspace: "02-日记"\ncreated: "${ts}"\nmodified: "${ts}"\ntags: ["worklog","work"]\nsource: "agent"\nstatus: "active"\n---\n# ${ds} 周${wd} 工作日志\n\n## 今日重点\n\n## 今日Todo\n\n## 重点记录\n\n## 关键决策\n\n## 明日计划\n`;
     f = await app.vault.create(path, tpl);
   }
@@ -216,7 +228,7 @@ export async function toggleTodoInWorklog(app: App, item: TodoItem): Promise<voi
   const f = app.vault.getAbstractFileByPath(path) as TFile | null;
   if (!f) return;
   const md = await app.vault.read(f);
-  const today = new Date().toISOString().slice(0,10);
+  const today = localDateStr(new Date());
   const lines = md.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
@@ -255,7 +267,7 @@ export async function renameTodoInWorklog(app: App, item: TodoItem, newText: str
 // ── Today's worklog entries (## 重点记录) ────────────────────
 export async function loadTodayWorklog(app: App): Promise<TodayWorklog | null> {
   try {
-    const today = new Date().toISOString().slice(0,10).replace(/-/g,"");
+    const today = localDateStr(new Date()).replace(/-/g,"");
     const logFile = app.vault.getMarkdownFiles().find(f =>
       f.path.startsWith("02-日记/工作日志/") && f.basename.startsWith(today)
     );

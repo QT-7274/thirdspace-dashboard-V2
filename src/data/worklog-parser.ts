@@ -1,3 +1,4 @@
+import { localDateStr } from "./vault-reader";
 import type { DailyActivity } from "./vault-reader";
 
 // Convert daily activity counts to snake Cell format
@@ -45,7 +46,7 @@ export function buildSnakeCells(activity: DailyActivity[]): SnakeCell[] {
 
       if (date > today) continue;
 
-      const dateStr = date.toISOString().slice(0, 10);
+      const dateStr = localDateStr(date);
       const count = activityMap[dateStr] || 0;
 
       cells.push({

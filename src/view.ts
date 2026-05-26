@@ -3,11 +3,12 @@ import type ThirdSpaceDashboard from "./main";
 import {
   loadWorkspaceIndex, getWorkspaceStats, getDailyActivity,
   loadProductStatus, parseProducts, getRecentFiles,
+  localDateStr, localDateCompact, localTimestamp,
   loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath,
   addTodoToWorklog, toggleTodoInWorklog, renameTodoInWorklog,
   type WorkspaceStats, type TodoItem, type VaultStats, type TodayWorklog,
 } from "./data/vault-reader";
-import { buildSnakeCells } from "./data/worklog-parser";
+import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
 
 export const VIEW_TYPE = "thirdspace-dashboard";
@@ -47,6 +48,7 @@ export class DashboardView extends ItemView {
   plugin: ThirdSpaceDashboard;
   private timer: number | null = null;
   private snakeRouteCache: SnakeRouteCache | null = null;
+  private snakeReplayTimer: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -57,7 +59,7 @@ export class DashboardView extends ItemView {
   getIcon()        { return "layout-dashboard"; }
 
   async onOpen()  { this.containerEl.addClass("ts-root"); await this.render(); this.timer = window.setInterval(() => this.render(), 60_000); }
-  onClose()       { if (this.timer) { clearInterval(this.timer); this.timer = null; } return Promise.resolve(); }
+  onClose()       { if (this.timer) { clearInterval(this.timer); this.timer = null; } if (this.snakeReplayTimer) { clearTimeout(this.snakeReplayTimer); this.snakeReplayTimer = null; } return Promise.resolve(); }
 
   async render() {
     const { contentEl } = this;
@@ -99,9 +101,16 @@ export class DashboardView extends ItemView {
     const streak = this.calcStreak(activity);
     if (streak > 0) heatHd.createSpan({ cls: "ts-card-meta", text: `⚡ ${streak}d streak` });
     const heatBody = heatSec.createDiv({ cls: "ts-heatmap-body" });
+
+    // 清除舊的 replay timer（本次全量刷新會重新建立）
+    if (this.snakeReplayTimer) { clearTimeout(this.snakeReplayTimer); this.snakeReplayTimer = null; }
+
     window.setTimeout(async () => {
       const cache = await renderSnakeHeatmap(heatBody, snakeCells, this.snakeRouteCache ?? undefined);
-      if (cache) this.snakeRouteCache = cache;
+      if (cache) {
+        this.snakeRouteCache = cache;
+        this.scheduleSnakeReplay(heatBody, snakeCells, cache.durationMs);
+      }
     }, 0);
 
     // ── Two columns
@@ -328,7 +337,7 @@ export class DashboardView extends ItemView {
   private calcStreak(activity: {date:string;count:number}[]): number {
     const set = new Set(activity.filter(a=>a.count>0).map(a=>a.date));
     let streak = 0; const d = new Date();
-    while (true) { const s = d.toISOString().slice(0,10); if (!set.has(s)) break; streak++; d.setDate(d.getDate()-1); }
+    while (true) { const s = localDateStr(d); if (!set.has(s)) break; streak++; d.setDate(d.getDate()-1); }
     return streak;
   }
   private relTime(ms: number): string {
@@ -352,8 +361,8 @@ export class DashboardView extends ItemView {
   }
   private async createNewNote() {
     const now = new Date();
-    const date = now.toISOString().slice(0,10).replace(/-/g,"");
-    const ts   = now.toISOString().slice(0,19).replace("T"," ");
+    const date = localDateCompact(now);
+    const ts   = localTimestamp(now);
     const path = `01-收件箱/${date}_untitled.md`;
     const fm   = ["---",`title: "Untitled"`,`type: note`,`topic: work`,`workspace: "01-收件箱"`,`created: "${ts}"`,`modified: "${ts}"`,`tags: ["note","draft"]`,`source: manual`,`status: draft`,"---","",""].join("\n");
     try { const f = await this.app.vault.create(path, fm); await this.app.workspace.getLeaf(false).openFile(f); }
@@ -361,7 +370,7 @@ export class DashboardView extends ItemView {
   }
   private async openTodayLog() {
     const today = new Date();
-    const ymd   = today.toISOString().slice(0,10).replace(/-/g,"");
+    const ymd   = localDateCompact(today);
     const wd    = ["日","一","二","三","四","五","六"][today.getDay()];
     const path  = `02-日记/工作日志/${ymd}_工作日志_周${wd}.md`;
     const f = this.app.vault.getAbstractFileByPath(path) as TFile|null;
@@ -378,4 +387,17 @@ export class DashboardView extends ItemView {
     }).open();
   }
   private runCmd(id: string) { try { (this.app as any).commands.executeCommandById(id); } catch {} }
+
+  /** 蛇跑完後等 2 秒自動重播，不依賴 60s 全量刷新 */
+  private scheduleSnakeReplay(container: HTMLElement, cells: SnakeCell[], durationMs: number) {
+    if (this.snakeReplayTimer) clearTimeout(this.snakeReplayTimer);
+    this.snakeReplayTimer = window.setTimeout(async () => {
+      if (!container.isConnected) return; // 面板已被全量刷新，跳過
+      const cache = await renderSnakeHeatmap(container, cells, this.snakeRouteCache ?? undefined);
+      if (cache) {
+        this.snakeRouteCache = cache;
+        this.scheduleSnakeReplay(container, cells, cache.durationMs);
+      }
+    }, durationMs + 2000); // 動畫結束後 2s 重播
+  }
 }

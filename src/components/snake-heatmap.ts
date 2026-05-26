@@ -19,11 +19,11 @@ const MOONLIT_DRAW_OPTIONS = {
 const MONTHS   = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAY_LBLS = ["Mon","","Wed","","Fri","","Sun"];
 
-/** 緩存的計算結果（grid + chain），不緩存 SVG 字符串 */
 export interface SnakeRouteCache {
   grid: Grid;
   chain: Snake[];
-  cellsKey: string;  // 用來判斷活動數據是否變化
+  cellsKey: string;
+  durationMs: number;
 }
 
 function cellsKey(cells: SnakeCell[]): string {
@@ -76,13 +76,27 @@ function addDateLabels(svgEl: SVGElement): void {
   }
 }
 
-/**
- * 渲染貪吃蛇熱力圖。
- *
- * 緩存策略：緩存 getBestRoute 的計算結果（grid + chain），而非 SVG 字符串。
- * 每次重新調用都生成新的 SVG 字符串，確保 CSS animation 必然重新播放。
- * 只有 cells 數據變化時才重新跑 getBestRoute（耗時操作）。
- */
+function injectAndPlay(container: HTMLElement, svg: string): void {
+  container.empty();
+  const wrapper = container.createDiv({ cls: "ts-snake-wrapper" });
+  wrapper.innerHTML = svg;
+  const svgEl = wrapper.querySelector("svg") as SVGElement | null;
+  if (!svgEl) return;
+
+  addDateLabels(svgEl);
+  svgEl.setAttribute("width","100%");
+  svgEl.style.maxWidth = "100%";
+
+  // 強制所有 CSS animation 重新播放
+  // （瀏覽器可能對相同類名的動畫有緩存，cancel+play 確保從頭開始）
+  requestAnimationFrame(() => {
+    svgEl.getAnimations({ subtree: true }).forEach(a => {
+      a.cancel();
+      a.play();
+    });
+  });
+}
+
 export async function renderSnakeHeatmap(
   container: HTMLElement,
   cells: SnakeCell[],
@@ -100,11 +114,9 @@ export async function renderSnakeHeatmap(
   let chain: Snake[];
 
   if (routeCache && routeCache.cellsKey === key) {
-    // 複用已計算的路徑，跳過耗時的 getBestRoute
     grid  = routeCache.grid;
     chain = routeCache.chain;
   } else {
-    // 首次或數據有變化：重新計算
     const loading = container.createDiv({ cls: "ts-snake-loading", text: "Computing snake path…" });
     try {
       grid  = cellsToGrid(cells);
@@ -117,20 +129,15 @@ export async function renderSnakeHeatmap(
     }
   }
 
-  // 每次都重新生成 SVG 字符串 → CSS animation 從頭開始播放
+  const durationMs = 80 * chain.length;
+
   try {
     const svg = createSvg(grid, null, chain, MOONLIT_DRAW_OPTIONS, { stepDurationMs: 80 });
-    const wrapper = container.createDiv({ cls: "ts-snake-wrapper" });
-    wrapper.innerHTML = svg;
-    const svgEl = wrapper.querySelector("svg") as SVGElement | null;
-    if (svgEl) {
-      addDateLabels(svgEl);
-      svgEl.setAttribute("width","100%"); svgEl.style.maxWidth = "100%";
-    }
+    injectAndPlay(container, svg);
   } catch (err) {
     container.createDiv({ cls: "ts-snake-error", text: `Snake render failed: ${err}` });
     return null;
   }
 
-  return { grid, chain, cellsKey: key };
+  return { grid, chain, cellsKey: key, durationMs };
 }
