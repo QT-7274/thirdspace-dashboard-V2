@@ -43,6 +43,93 @@
 | **PRODUCTS** | 读取 `04-项目/product-status.md`，展示产品/项目状态 |
 | **RECENT** | 最近 7 天修改的文件，基于 frontmatter `modified` 字段 |
 
+## 数据源映射
+
+**本插件与 [thirdspace-vault-template](https://github.com/zzyong24/thirdspace-vault-template) 强制绑定**，以下文件路径和格式均源自该模板约定，缺失或格式不对会导致对应面板空白或降级。
+
+### UI 面板 → 文件对应关系
+
+| 面板 | 读取文件 | 依赖字段 / Section | 缺失时的行为 |
+|------|---------|-------------------|------------|
+| **统计栏**（总数/本周/本月/活跃天） | 全库所有 `.md` | `frontmatter.created`（fallback: `stat.ctime`） | 降级到文件系统时间，统计仍可用 |
+| **ACTIVITY 热力图** | 全库所有 `.md` | `frontmatter.created` | 同上 |
+| **WORKSPACES**（文件数/活跃时间） | `.thirdspace/workspace-index.yaml` + 各工作区目录下所有 `.md` | `frontmatter.modified`（fallback: `stat.mtime`） | yaml 缺失时降级为 8 个默认目录 |
+| **TODAY 工作日志** | `02-日记/工作日志/YYYYMMDD_工作日志_周X.md` | `## 今日重点`、`## 重点记录` | 文件不存在则面板隐藏 |
+| **TODAY'S TODOS** | 同上，今日工作日志 | `## 今日Todo`，格式 `- [ ] xxx` / `- [x] xxx ✅ YYYY-MM-DD` | 无 todo 文件则空列表 |
+| **PRODUCTS** | `04-项目/product-status.md` | `## 🟢/🟡/🔴 分组标题`、`### 产品名`、`当前里程碑：xxx` | 文件不存在则面板隐藏 |
+| **RECENT** | 全库所有 `.md` | `frontmatter.modified`（fallback: `stat.mtime`） | 降级到文件系统时间 |
+
+### 工作日志文件路径规则
+
+```
+02-日记/工作日志/{YYYYMMDD}_工作日志_周{X}.md
+```
+
+- `YYYYMMDD`：今日日期紧凑格式，如 `20260527`
+- `周X`：周几，取值 `日一二三四五六`
+- 匹配逻辑：`basename.startsWith(today)` —— 只要文件名以今日日期开头即可匹配
+
+**工作日志模板必须包含以下 section（顺序不限）：**
+
+```markdown
+## 今日重点
+- 摘要行（最多展示 3 条）
+
+## 今日Todo
+- [ ] 待办事项
+- [x] 已完成 ✅ 2026-05-27
+
+## 重点记录
+### 16:00 — 标题（格式必须是 `### HH:MM — 标题`）
+内容...
+```
+
+### workspace-index.yaml 格式
+
+路径：`.thirdspace/workspace-index.yaml`（Vault 根目录下）
+
+```yaml
+workspaces:
+  - dir: "01-收件箱"
+    skill: "inbox"
+    desc: "收件箱"
+  - dir: "02-日记"
+    skill: "diary"
+    desc: "日记"
+```
+
+缺失此文件时，插件降级使用内置的 8 个默认工作区目录：`00-系统`、`01-收件箱`、`02-日记`、`03-知识`、`04-项目`、`05-资源`、`06-输出`、`99-归档`。
+
+### product-status.md 格式
+
+路径：`04-项目/product-status.md`
+
+```markdown
+## 🟢 进行中
+
+### 产品名称
+- 当前里程碑：v1.2 公测
+
+## 🟡 观察中
+
+### 另一个产品
+
+## 🔴 搁置 / 放弃
+```
+
+状态通过 `## ` 标题行中的 emoji 识别：`🟢` = active，`🟡` = watch，`🔴/搁置/放弃` = paused。
+
+### 统计排除规则
+
+以下文件在所有统计中自动排除：
+
+| 类型 | 规则 | 示例 |
+|------|------|------|
+| 目录排除 | 路径段完全匹配 `_legacy`、`.thirdspace` | `_legacy/old.md` |
+| 文件名排除 | basename 完全匹配（大小写敏感） | `WORKSPACE.md`、`AGENTS.md`、`CLAUDE.md`、`README.md`、`INDEX.md` |
+
+---
+
 ## 安装
 
 ### 方式一：通过 ThirdSpace 模板初始化（推荐）
@@ -106,11 +193,12 @@ Todos 存储在今日工作日志的 `## 今日Todo` section：
 
 ## 与 ThirdSpace 系统集成
 
-本插件与 [thirdspace-vault-template](https://github.com/zzyong24/thirdspace-vault-template) 深度集成：
+完整的文件路径、格式约定和取数逻辑见上方「[数据源映射](#数据源映射)」章节。
 
-- **工作日志**：git commit 自动写入 `## Git 提交`，AI session 结束自动写入 `## 重点记录`
-- **Frontmatter**：所有时间统计基于 frontmatter `created`/`modified`，不依赖文件系统时间
-- **工作区路由**：与 `.thirdspace/workspace-index.yaml` 对应
+额外的自动化写入（由外部工具触发，非插件本身）：
+
+- **git commit hook** → 自动追加到今日工作日志 `## Git 提交`
+- **AI session 结束 hook** → 自动追加到 `## 重点记录`
 
 ## 开发
 

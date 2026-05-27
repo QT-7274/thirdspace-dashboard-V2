@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production"
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "deploy": "npm run build && cp main.js ../vault/.obsidian/plugins/thirdspace-dashboard/main.js && cp main.css ../vault/.obsidian/plugins/thirdspace-dashboard/styles.css && echo '✅ deployed to vault'"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

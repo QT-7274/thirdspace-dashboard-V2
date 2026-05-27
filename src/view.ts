@@ -25,14 +25,13 @@ class TodoModal extends Modal {
     contentEl.createEl("h3", { text: "新增 Todo", cls: "ts-modal-title" });
 
     const input = contentEl.createEl("input", { type: "text", cls: "ts-modal-input" });
-    input.placeholder = "输入 todo 内容，回车确认";
+    input.placeholder = "输入 todo 内容";
     input.focus();
 
     const submit = () => {
       const val = input.value.trim();
       if (val) { this.onSubmit(val); this.close(); }
     };
-    input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
 
     const row = contentEl.createDiv({ cls: "ts-modal-row" });
     const btn = row.createEl("button", { text: "添加", cls: "ts-modal-btn ts-modal-btn--primary" });
@@ -124,10 +123,11 @@ export class DashboardView extends ItemView {
     this.renderWorkspaces(wsCard, wsStats);
 
     // LEFT: todos
-    const todoCard = left.createDiv({ cls: "ts-card" });
+    const todoCard = left.createDiv({ cls: "ts-card ts-todo-card" });
     const tdHd = todoCard.createDiv({ cls: "ts-card-head" });
     tdHd.createSpan({ cls: "ts-card-label", text: "TODAY'S TODOS" });
-    if (pending.length > 0) tdHd.createSpan({ cls: "ts-card-meta", text: `${pending.length} pending` });
+    const tdMeta = tdHd.createSpan({ cls: "ts-card-meta ts-todo-meta" });
+    if (pending.length > 0) tdMeta.setText(`${pending.length} pending`);
     this.renderTodos(todoCard, todos);
 
     // RIGHT: today's worklog
@@ -139,14 +139,7 @@ export class DashboardView extends ItemView {
       this.renderTodayWorklog(logCard, todayWorklog);
     }
 
-    // RIGHT: products
-    if (products.length > 0) {
-      const prodCard = right.createDiv({ cls: "ts-card" });
-      prodCard.createDiv({ cls: "ts-card-label", text: "PRODUCTS" });
-      this.renderProducts(prodCard, products);
-    }
-
-    // RIGHT: quick actions
+    // RIGHT: quick actions (高频操作前置)
     const actCard = right.createDiv({ cls: "ts-card" });
     actCard.createDiv({ cls: "ts-card-label", text: "QUICK" });
     this.renderActions(actCard);
@@ -156,6 +149,13 @@ export class DashboardView extends ItemView {
       const recCard = right.createDiv({ cls: "ts-card" });
       recCard.createDiv({ cls: "ts-card-label", text: "RECENT" });
       this.renderRecent(recCard, recent);
+    }
+
+    // RIGHT: products
+    if (products.length > 0) {
+      const prodCard = right.createDiv({ cls: "ts-card" });
+      prodCard.createDiv({ cls: "ts-card-label", text: "PRODUCTS" });
+      this.renderProducts(prodCard, products);
     }
   }
 
@@ -183,9 +183,9 @@ export class DashboardView extends ItemView {
       const top = card.createDiv({ cls: "ts-ws-top" });
       top.createSpan({ cls: "ts-ws-icon", text: ws.icon });
       top.createSpan({ cls: "ts-ws-name", text: ws.desc });
-      card.createDiv({ cls: "ts-ws-count", text: String(ws.fileCount) });
+      card.createDiv({ cls: "ts-ws-count", text: `${ws.fileCount} files` });
       card.createDiv({ cls: "ts-ws-bar" }).createDiv({ cls: "ts-ws-fill", attr: { style: `width:${Math.round(ws.fileCount/maxFiles*100)}%` } });
-      card.createDiv({ cls: "ts-ws-time", text: ws.lastModified ? this.relTime(ws.lastModified) : "—" });
+      card.createDiv({ cls: "ts-ws-time", text: ws.lastModified ? `active ${this.relTime(ws.lastModified)}` : "—" });
     }
   }
 
@@ -215,11 +215,24 @@ export class DashboardView extends ItemView {
     const chk = row.createEl("span", { cls: "ts-todo-chk", text: item.done ? "☑" : "☐" });
     const txt = row.createSpan({ cls: "ts-todo-txt", text: item.text });
 
-    // checkbox 单击 = 切换完成状态
+    // checkbox 单击 = 切换完成状态（原地更新，无全页刷新）
     chk.addEventListener("click", async e => {
       e.stopPropagation();
+      // 乐观更新：先改 DOM，再写文件
+      item.done = !item.done;
+      chk.setText(item.done ? "☑" : "☐");
+      if (item.done) row.addClass("ts-todo-done");
+      else           row.removeClass("ts-todo-done");
+      // 同步更新 header 上的 pending 计数
+      const todoCard = row.closest<HTMLElement>(".ts-todo-card");
+      if (todoCard) {
+        const meta = todoCard.querySelector<HTMLElement>(".ts-todo-meta");
+        if (meta) {
+          const pendingCount = todoCard.querySelectorAll<HTMLElement>(".ts-todo-row:not(.ts-todo-done)").length;
+          meta.setText(pendingCount > 0 ? `${pendingCount} pending` : "");
+        }
+      }
       await toggleTodoInWorklog(this.app, item);
-      await this.render();
     });
 
     // 单击行 = 打开文件（detail >= 2 时忽略，让 dblclick 接管）
@@ -251,13 +264,21 @@ export class DashboardView extends ItemView {
         const newText = input.value.trim();
         if (newText && newText !== item.text) {
           await renameTodoInWorklog(this.app, item, newText);
+          item.text = newText;
         }
-        await this.render();
+        // 原地把 input 换回 span，无全页刷新
+        const span = createEl("span", { cls: "ts-todo-txt", text: item.text });
+        input.replaceWith(span);
       };
 
       input.addEventListener("keydown", async ev => {
         if (ev.key === "Enter")  { ev.preventDefault(); await save(); }
-        if (ev.key === "Escape") { saved = true; await this.render(); }
+        if (ev.key === "Escape") {
+          saved = true;
+          // 取消：原地恢复原始 span
+          const span = createEl("span", { cls: "ts-todo-txt", text: item.text });
+          input.replaceWith(span);
+        }
       });
       input.addEventListener("blur", save);
     });
@@ -383,8 +404,26 @@ export class DashboardView extends ItemView {
   private openTodoModal() {
     new TodoModal(this.app, async (text) => {
       await addTodoToWorklog(this.app, text);
-      await this.render();
+      await this.refreshTodoSection();
     }).open();
+  }
+
+  /** 局部刷新 todo card，不触发全页重绘 */
+  private async refreshTodoSection() {
+    const todoCard = this.containerEl.querySelector<HTMLElement>(".ts-todo-card");
+    if (!todoCard) { await this.render(); return; }
+
+    const todos   = await loadTodos(this.app);
+    const pending = todos.filter(t => !t.done);
+
+    // 更新 pending 计数
+    const meta = todoCard.querySelector<HTMLElement>(".ts-todo-meta");
+    if (meta) meta.setText(pending.length > 0 ? `${pending.length} pending` : "");
+
+    // 替换列表内容
+    const existing = todoCard.querySelector<HTMLElement>(".ts-todo-list, .ts-empty");
+    if (existing) existing.remove();
+    this.renderTodos(todoCard, todos);
   }
   private runCmd(id: string) { try { (this.app as any).commands.executeCommandById(id); } catch {} }
 

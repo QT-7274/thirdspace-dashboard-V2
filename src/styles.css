@@ -501,6 +501,15 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
 }
 .ts-modal-btn--primary:hover { background: var(--rust-2); border-color: var(--rust-2); color: #fff; }
 
+/* ── Snake wrapper fade-in on replay ────────────────────────── */
+.ts-snake-wrapper {
+  animation: tsSnakeFadeIn 0.25s ease;
+}
+@keyframes tsSnakeFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ── Dark mode ──────────────────────────────────────────────── */
 body.theme-dark .ts-dash {
   --rust:    #E05A4A;

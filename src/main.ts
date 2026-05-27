@@ -7,13 +7,13 @@ export default class ThirdSpaceDashboard extends Plugin {
     this.registerView(VIEW_TYPE, (leaf) => new DashboardView(leaf, this));
 
     this.addRibbonIcon("layout-dashboard", "ThirdSpace Dashboard", () => {
-      this.toggleView();
+      this.activateView();
     });
 
     this.addCommand({
       id: "open-dashboard",
-      name: "Toggle ThirdSpace Dashboard",
-      callback: () => this.toggleView(),
+      name: "Open ThirdSpace Dashboard",
+      callback: () => this.activateView(),
     });
   }
 
@@ -21,13 +21,13 @@ export default class ThirdSpaceDashboard extends Plugin {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 
-  async toggleView(): Promise<void> {
+  async activateView(): Promise<void> {
     const { workspace } = this.app;
     const existing = workspace.getLeavesOfType(VIEW_TYPE);
 
     if (existing.length > 0) {
-      // Already open → close/detach
-      existing[0].detach();
+      // Already open → just reveal it, never close
+      workspace.revealLeaf(existing[0]);
       return;
     }
 
