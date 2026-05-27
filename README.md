@@ -3,6 +3,8 @@
 > [ThirdSpace](https://github.com/zzyong24/thirdspace-vault-template) 知识库系统的 Obsidian 控制台插件。
 
 ## 界面预览
+<img width="1470" height="849" alt="image" src="https://github.com/user-attachments/assets/279d5506-8aee-4c60-a068-dbca5c25450e" />
+
 
 ```
 ┌─────────────────────────────────────────────────────────┐
