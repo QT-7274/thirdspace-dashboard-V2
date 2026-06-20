@@ -233,17 +233,22 @@
 }
 
 /* ── Quick actions ──────────────────────────────────────── */
+.ts-quick-card {
+  padding: 14px 18px 16px;
+}
 .ts-act-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
+  gap: 10px;
 }
 .ts-act-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 4px 8px;
+  justify-content: center;
+  gap: 8px;
+  min-height: 62px;
+  padding: 12px 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r);
   background: var(--cream);
@@ -258,8 +263,8 @@
   transform: translateY(-2px);
   box-shadow: 0 3px 8px rgba(181,57,42,.12);
 }
-.ts-act-icon { font-size: 16px; line-height: 1; color: var(--rust); }
-.ts-act-label { font-size: 10px; font-weight: 600; text-align: center; color: var(--ink-2); }
+.ts-act-icon { font-size: 18px; line-height: 1; color: var(--rust); }
+.ts-act-label { font-size: 11px; font-weight: 700; text-align: center; color: var(--ink-2); line-height: 1.15; }
 
 /* ── Recent ─────────────────────────────────────────────── */
 .ts-rec-list { display: flex; flex-direction: column; gap: 1px; }
@@ -408,6 +413,83 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   padding: 3px 6px;
 }
 
+/* ── Scoped tasks ─────────────────────────────────────────── */
+.ts-scoped-list { display: flex; flex-direction: column; gap: 8px; }
+.ts-scoped-section {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--cream);
+  padding: 6px;
+}
+.ts-scoped-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.ts-scoped-section-title {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--rust);
+  letter-spacing: .6px;
+}
+.ts-scoped-section-count {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+}
+.ts-scoped-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ts-scoped-row:hover { background: var(--rust-lo); }
+.ts-scoped-info { min-width: 0; }
+.ts-scoped-text {
+  font-size: 11.5px;
+  color: var(--ink);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-scoped-meta {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-scoped-add {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--rust);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.ts-scoped-add:hover {
+  border-color: var(--rust);
+  background: var(--rust-lo);
+}
+.ts-scoped-add:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: .65;
+}
+
 /* ── Today log — worklog entries ───────────────────────────── */
 .ts-log-body { display: flex; flex-direction: column; gap: 6px; }
 
@@ -466,7 +548,21 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
 .ts-ws-card { cursor: pointer; }
 
 /* ── Modal ──────────────────────────────────────────────────── */
-.ts-modal { padding: 4px; }
+.ts-modal {
+  --rust:    #B5392A;
+  --rust-2:  #8B1A0A;
+  --rust-lo: rgba(181,57,42,.08);
+  --ink:     #1A1A1A;
+  --ink-2:   #444;
+  --muted:   #8A7968;
+  --border:  rgba(26,26,26,.12);
+  --cream:   #F0EAE0;
+  --surface: #FEFCF8;
+  --r:       5px;
+  --mono:    "JetBrains Mono","Fira Code","SF Mono",monospace;
+  --sans:    "Noto Sans SC","PingFang SC",system-ui,sans-serif;
+  padding: 4px;
+}
 .ts-modal-title { font-size: 14px; font-weight: 700; color: var(--ink); margin-bottom: 12px; }
 .ts-modal-input {
   width: 100%;
@@ -482,6 +578,73 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   outline: none;
 }
 .ts-modal-input:focus { border-color: var(--rust); }
+.ts-modal-field-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .5px;
+  margin: 8px 0 5px;
+}
+.ts-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ts-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 10px;
+  transition: all .15s;
+}
+.ts-chip:hover {
+  border-color: var(--rust);
+  color: var(--rust);
+}
+.ts-chip--active {
+  background-color: var(--rust);
+  border-color: var(--rust);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 2px 6px rgba(181,57,42,.18);
+}
+.ts-modal .ts-chip.ts-chip--active:hover,
+.ts-chip--active:hover {
+  background-color: var(--rust-2);
+  border-color: var(--rust-2);
+  color: #fff;
+}
+.ts-modal-date-row {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ts-modal-date-row .ts-modal-field-label { margin: 0; }
+.ts-modal-date-row--hidden { display: none; }
+.ts-modal-date-input {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+}
+.ts-modal-date-input:focus { border-color: var(--rust); }
+.ts-modal-error {
+  min-height: 16px;
+  color: var(--rust);
+  font-size: 11px;
+  margin: 2px 0 8px;
+}
 .ts-modal-row { display: flex; gap: 8px; justify-content: flex-end; }
 .ts-modal-btn {
   padding: 6px 16px;
@@ -525,11 +688,26 @@ body.theme-dark .ts-dash {
   background: var(--cream);
   color: var(--ink);
 }
+body.theme-dark .ts-modal {
+  --rust:    #E05A4A;
+  --rust-2:  #C04030;
+  --rust-lo: rgba(224,90,74,.12);
+  --ink:     #E8E4DC;
+  --ink-2:   #C0BAB0;
+  --muted:   #7A7468;
+  --border:  rgba(255,255,255,.10);
+  --cream:   #1E1C18;
+  --surface: #262420;
+}
 body.theme-dark .ts-ws-card   { background: var(--surface); }
 body.theme-dark .ts-prod-row  { background: var(--surface); }
 body.theme-dark .ts-act-btn   { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-stat-cell { background: var(--surface); }
+body.theme-dark .ts-scoped-section { background: var(--surface); }
 body.theme-dark .ts-modal-input { background: var(--surface); color: var(--ink); }
+body.theme-dark .ts-modal-date-input { background: var(--surface); color: var(--ink); }
+body.theme-dark .ts-chip { background: var(--surface); color: var(--ink-2); }
+body.theme-dark .ts-chip--active { background: var(--rust); color: #fff; }
 body.theme-dark .ts-modal-btn   { background: var(--surface); color: var(--ink-2); }
 
 @media (max-width: 520px) {

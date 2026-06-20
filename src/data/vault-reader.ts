@@ -31,6 +31,9 @@ export interface WorkspaceEntry  { dir: string; skill: string; desc: string; }
 export interface WorkspaceStats  { dir: string; icon: string; desc: string; fileCount: number; lastModified: number; }
 export interface DailyActivity   { date: string; count: number; }
 export interface TodoItem        { text: string; done: boolean; }
+export type TaskScope            = "today" | "week" | "month" | "longterm" | "custom";
+export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; }
+export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; }
 export interface VaultStats      { total: number; thisWeek: number; thisMonth: number; activeDays: number; }
 export interface WorklogEntry    { time: string; title: string; }
 export interface TodayWorklog    { highlights: string[]; entries: WorklogEntry[]; }
@@ -59,12 +62,29 @@ const DEFAULT_WORKSPACES = [
   "04-项目","05-资源","06-输出","99-归档",
 ];
 const WEEKDAYS = ["日","一","二","三","四","五","六"];
+const TASK_POOL_PATH = "00-系统/tasks.md";
+const TASK_SCOPE_LABELS: Record<Exclude<TaskScope, "today">, string> = {
+  week: "本周",
+  month: "本月",
+  longterm: "长期",
+  custom: "指定日期",
+};
+const TASK_SCOPE_BY_LABEL: Record<string, Exclude<TaskScope, "today">> = {
+  "本周": "week",
+  "本月": "month",
+  "长期": "longterm",
+  "指定日期": "custom",
+};
 
 // ── Worklog path helper ──────────────────────────────────────
 export function getTodayWorklogPath(): string {
   const now = new Date();
   const ymd = localDateCompact(now);
   return `02-日记/工作日志/${ymd}_工作日志_周${WEEKDAYS[now.getDay()]}.md`;
+}
+
+export function getTaskPoolPath(): string {
+  return TASK_POOL_PATH;
 }
 
 // ── Workspace index ──────────────────────────────────────────
@@ -197,6 +217,188 @@ export function parseTodosFromMd(md: string): TodoItem[] {
   return items;
 }
 
+function normalizeTag(tag: string): string | null {
+  const cleaned = tag.trim().replace(/^#/, "").replace(/\s+/g, "-");
+  return cleaned ? cleaned : null;
+}
+
+function uniqueTags(tags: string[] = []): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of tags) {
+    const tag = normalizeTag(raw);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    result.push(tag);
+  }
+  return result;
+}
+
+function isValidDueDate(dueDate: string | undefined): dueDate is string {
+  return !!dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate);
+}
+
+export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): string | undefined {
+  const d = new Date(baseDate);
+  d.setHours(0, 0, 0, 0);
+
+  if (scope === "week") {
+    const dow = d.getDay();
+    const start = new Date(d);
+    start.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return `${localDateStr(start)} 到 ${localDateStr(end)}`;
+  }
+
+  if (scope === "month") {
+    const start = new Date(d.getFullYear(), d.getMonth(), 1);
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    return `${localDateStr(start)} 到 ${localDateStr(end)}`;
+  }
+
+  return undefined;
+}
+
+function formatTodayTodoText(input: ScopedTodoInput | ScopedTodoItem): string {
+  const tags = uniqueTags(input.tags);
+  const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
+  const dateText = isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
+  const rangeText = "periodRange" in input && input.periodRange ? ` 📆 ${input.periodRange}` : "";
+  return `${input.text.trim()}${tagText}${rangeText}${dateText}`;
+}
+
+export function formatScopedTodoLine(input: ScopedTodoInput, baseDate = new Date()): string {
+  const tags = uniqueTags([...(input.tags ?? []), `task/scope-${input.scope}`]);
+  const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
+  const periodRange = getScopeDateRange(input.scope, baseDate);
+  const rangeText = periodRange ? ` 📆 ${periodRange}` : "";
+  const dateText = input.scope === "custom" && isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
+  return `- [ ] ${input.text.trim()}${tagText}${rangeText}${dateText}`;
+}
+
+export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
+  const items: ScopedTodoItem[] = [];
+  let scope: Exclude<TaskScope, "today"> | null = null;
+
+  for (const rawLine of md.split("\n")) {
+    const heading = rawLine.match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      scope = TASK_SCOPE_BY_LABEL[heading[1]] ?? null;
+      continue;
+    }
+    if (!scope) continue;
+
+    const checkbox = rawLine.match(/^- \[( |x)\]\s+(.+)/);
+    if (!checkbox) continue;
+    const done = checkbox[1] === "x";
+    if (done) continue;
+
+    const body = checkbox[2];
+    const dueDate = body.match(/📅\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+    const periodRange = body.match(/📆\s*(\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2})/)?.[1];
+    const tags = Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g))
+      .map(match => match[1])
+      .filter(tag => !tag.startsWith("task/scope-"));
+    const text = body
+      .replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "")
+      .replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "")
+      .replace(/📆\s*\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2}/g, "")
+      .replace(/(?:^|\s)#[^\s#]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (text) items.push({
+      text,
+      done,
+      scope,
+      tags: uniqueTags(tags),
+      ...(periodRange ? { periodRange } : {}),
+      ...(dueDate ? { dueDate } : {}),
+    });
+  }
+
+  return items;
+}
+
+export function buildTaskPoolTemplate(firstTask?: ScopedTodoInput): string {
+  const scopedTask = firstTask && firstTask.scope !== "today" ? firstTask : null;
+  const sections = (Object.keys(TASK_SCOPE_LABELS) as Array<Exclude<TaskScope, "today">>)
+    .map(scopeKey => {
+      const line = scopedTask?.scope === scopeKey ? `\n${formatScopedTodoLine(scopedTask)}` : "";
+      return `## ${TASK_SCOPE_LABELS[scopeKey]}${line}`;
+    });
+  return `# Tasks\n\n${sections.join("\n\n")}\n`;
+}
+
+function ensureTaskPoolSections(md: string): string {
+  const trimmed = md.trim();
+  let next = trimmed ? md : "# Tasks\n";
+  for (const label of Object.values(TASK_SCOPE_LABELS)) {
+    if (!new RegExp(`^##\\s+${label}\\s*$`, "m").test(next)) {
+      next = `${next.replace(/\s*$/, "")}\n\n## ${label}\n`;
+    }
+  }
+  return next;
+}
+
+function insertScopedTodoIntoMd(md: string, input: ScopedTodoInput): string {
+  if (input.scope === "today") return md;
+
+  const label = TASK_SCOPE_LABELS[input.scope];
+  const lines = ensureTaskPoolSections(md).split("\n");
+  const secIdx = lines.findIndex(line => line.trim() === `## ${label}`);
+  const newItem = formatScopedTodoLine(input);
+
+  if (secIdx >= 0) {
+    let insertAt = secIdx + 1;
+    while (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
+    lines.splice(insertAt, 0, newItem);
+  } else {
+    lines.push("", `## ${label}`, newItem);
+  }
+
+  return `${lines.join("\n").replace(/\s*$/, "")}\n`;
+}
+
+async function ensureFolder(app: App, folderPath: string): Promise<void> {
+  if (app.vault.getAbstractFileByPath(folderPath)) return;
+  try { await app.vault.createFolder(folderPath); } catch {}
+}
+
+export async function loadScopedTodos(app: App): Promise<ScopedTodoItem[]> {
+  try {
+    const f = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
+    if (!f) return [];
+    const md = await app.vault.read(f);
+    return parseScopedTodosFromMd(md);
+  } catch { return []; }
+}
+
+export async function addScopedTodo(app: App, input: ScopedTodoInput): Promise<void> {
+  const text = input.text.trim();
+  if (!text) return;
+
+  if (input.scope === "today") {
+    await addTodoToWorklog(app, formatTodayTodoText({ ...input, text }));
+    return;
+  }
+
+  await ensureFolder(app, TASK_POOL_PATH.split("/").slice(0, -1).join("/"));
+  let f = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
+  if (!f) {
+    f = await app.vault.create(TASK_POOL_PATH, buildTaskPoolTemplate({ ...input, text }));
+    return;
+  }
+
+  const md = await app.vault.read(f);
+  await app.vault.modify(f, insertScopedTodoIntoMd(md, { ...input, text }));
+}
+
+export async function addScopedTodoToToday(app: App, item: ScopedTodoItem): Promise<void> {
+  await addTodoToWorklog(app, formatTodayTodoText(item));
+}
+
 export async function addTodoToWorklog(app: App, text: string): Promise<void> {
   const path = getTodayWorklogPath();
   let f = app.vault.getAbstractFileByPath(path) as TFile | null;
@@ -223,26 +425,33 @@ export async function addTodoToWorklog(app: App, text: string): Promise<void> {
   await app.vault.modify(f, lines.join("\n"));
 }
 
-export async function toggleTodoInWorklog(app: App, item: TodoItem): Promise<void> {
-  const path = getTodayWorklogPath();
-  const f = app.vault.getAbstractFileByPath(path) as TFile | null;
-  if (!f) return;
-  const md = await app.vault.read(f);
-  const today = localDateStr(new Date());
+export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean, doneDate: string): string {
   const lines = md.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
     const cleaned = m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,"").trim();
     if (cleaned !== item.text) continue;
-    if (item.done) {
-      lines[i] = lines[i].replace(/^- \[x\]/, "- [ ]").replace(/ ✅ \d{4}-\d{2}-\d{2}/g,"");
+
+    if (targetDone) {
+      const withoutDate = lines[i].replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
+      lines[i] = withoutDate.replace(/^- \[[ x]\]/, "- [x]") + ` ✅ ${doneDate}`;
     } else {
-      lines[i] = lines[i].replace(/^- \[ \]/, "- [x]") + ` ✅ ${today}`;
+      lines[i] = lines[i].replace(/^- \[[ x]\]/, "- [ ]").replace(/ ✅ \d{4}-\d{2}-\d{2}/g,"");
     }
-    await app.vault.modify(f, lines.join("\n"));
-    return;
+    break;
   }
+  return lines.join("\n");
+}
+
+export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone = !item.done): Promise<void> {
+  const path = getTodayWorklogPath();
+  const f = app.vault.getAbstractFileByPath(path) as TFile | null;
+  if (!f) return;
+  const md = await app.vault.read(f);
+  const today = localDateStr(new Date());
+  const next = setTodoDoneInMd(md, item, targetDone, today);
+  if (next !== md) await app.vault.modify(f, next);
 }
 
 export async function renameTodoInWorklog(app: App, item: TodoItem, newText: string): Promise<void> {

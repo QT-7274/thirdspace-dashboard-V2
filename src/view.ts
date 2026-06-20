@@ -4,21 +4,41 @@ import {
   loadWorkspaceIndex, getWorkspaceStats, getDailyActivity,
   loadProductStatus, parseProducts, getRecentFiles,
   localDateStr, localDateCompact, localTimestamp,
-  loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath,
-  addTodoToWorklog, toggleTodoInWorklog, renameTodoInWorklog,
+  loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath, getTaskPoolPath,
+  loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog,
   type WorkspaceStats, type TodoItem, type VaultStats, type TodayWorklog,
+  type ScopedTodoInput, type ScopedTodoItem, type TaskScope,
 } from "./data/vault-reader";
 import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
+import { shouldSubmitOnEnter } from "./utils/keyboard";
+import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getNextVisibleCount, getRemainingCount } from "./utils/pagination";
 
 export const VIEW_TYPE = "thirdspace-dashboard";
 
 // ── Todo Input Modal ──────────────────────────────────────────
+const TODO_SCOPE_OPTIONS: Array<{ scope: TaskScope; label: string }> = [
+  { scope: "today", label: "今日" },
+  { scope: "week", label: "本周" },
+  { scope: "month", label: "本月" },
+  { scope: "longterm", label: "长期" },
+  { scope: "custom", label: "指定日期" },
+];
+const TODO_TAG_OPTIONS = ["工作", "项目", "学习", "生活", "插件"];
+
 class TodoModal extends Modal {
-  private onSubmit: (text: string) => void;
-  constructor(app: any, onSubmit: (text: string) => void) {
+  private onSubmit: (input: ScopedTodoInput) => void;
+  private selectedScope: TaskScope = "today";
+  private tags = new Set<string>();
+  private dateRow: HTMLElement | null = null;
+  private dateInput: HTMLInputElement | null = null;
+  private errorEl: HTMLElement | null = null;
+  private isComposingText = false;
+
+  constructor(app: any, onSubmit: (input: ScopedTodoInput) => void) {
     super(app); this.onSubmit = onSubmit;
   }
+
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("ts-modal");
@@ -27,10 +47,65 @@ class TodoModal extends Modal {
     const input = contentEl.createEl("input", { type: "text", cls: "ts-modal-input" });
     input.placeholder = "输入 todo 内容";
     input.focus();
+    input.addEventListener("compositionstart", () => { this.isComposingText = true; });
+    input.addEventListener("compositionend", () => { this.isComposingText = false; });
+
+    const scopeLabel = contentEl.createDiv({ cls: "ts-modal-field-label", text: "周期" });
+    const scopeRow = contentEl.createDiv({ cls: "ts-chip-row" });
+    const scopeButtons = new Map<TaskScope, HTMLButtonElement>();
+    for (const option of TODO_SCOPE_OPTIONS) {
+      const btn = scopeRow.createEl("button", { text: option.label, cls: "ts-chip" });
+      btn.type = "button";
+      scopeButtons.set(option.scope, btn);
+      btn.addEventListener("click", () => {
+        this.selectedScope = option.scope;
+        this.renderScopeState(scopeButtons);
+      });
+    }
+    scopeLabel.setAttr("aria-hidden", "true");
+
+    this.dateRow = contentEl.createDiv({ cls: "ts-modal-date-row" });
+    this.dateRow.createSpan({ text: "日期", cls: "ts-modal-field-label" });
+    this.dateInput = this.dateRow.createEl("input", { type: "date", cls: "ts-modal-date-input" });
+
+    contentEl.createDiv({ cls: "ts-modal-field-label", text: "标签" });
+    const tagRow = contentEl.createDiv({ cls: "ts-chip-row" });
+    for (const tag of TODO_TAG_OPTIONS) {
+      const btn = tagRow.createEl("button", { text: tag, cls: "ts-chip" });
+      btn.type = "button";
+      btn.addEventListener("click", () => {
+        if (this.tags.has(tag)) {
+          this.tags.delete(tag);
+          btn.removeClass("ts-chip--active");
+        } else {
+          this.tags.add(tag);
+          btn.addClass("ts-chip--active");
+        }
+      });
+    }
+
+    this.errorEl = contentEl.createDiv({ cls: "ts-modal-error" });
 
     const submit = () => {
       const val = input.value.trim();
-      if (val) { this.onSubmit(val); this.close(); }
+      if (!val) {
+        this.setError("先写一点任务内容");
+        input.focus();
+        return;
+      }
+      const dueDate = this.dateInput?.value.trim();
+      if (this.selectedScope === "custom" && !dueDate) {
+        this.setError("选择指定日期时需要填写日期");
+        this.dateInput?.focus();
+        return;
+      }
+      this.onSubmit({
+        text: val,
+        scope: this.selectedScope,
+        tags: Array.from(this.tags),
+        ...(this.selectedScope === "custom" && dueDate ? { dueDate } : {}),
+      });
+      this.close();
     };
 
     const row = contentEl.createDiv({ cls: "ts-modal-row" });
@@ -38,7 +113,38 @@ class TodoModal extends Modal {
     btn.addEventListener("click", submit);
     const cancel = row.createEl("button", { text: "取消", cls: "ts-modal-btn" });
     cancel.addEventListener("click", () => this.close());
+
+    input.addEventListener("keydown", ev => {
+      if (shouldSubmitOnEnter(ev, this.isComposingText)) {
+        ev.preventDefault();
+        submit();
+      }
+    });
+    this.dateInput.addEventListener("keydown", ev => {
+      if (shouldSubmitOnEnter(ev)) {
+        ev.preventDefault();
+        submit();
+      }
+    });
+    this.renderScopeState(scopeButtons);
   }
+
+  private renderScopeState(scopeButtons: Map<TaskScope, HTMLButtonElement>) {
+    for (const [scope, btn] of scopeButtons) {
+      if (scope === this.selectedScope) btn.addClass("ts-chip--active");
+      else btn.removeClass("ts-chip--active");
+    }
+    if (this.dateRow) {
+      if (this.selectedScope === "custom") this.dateRow.removeClass("ts-modal-date-row--hidden");
+      else this.dateRow.addClass("ts-modal-date-row--hidden");
+    }
+    this.setError("");
+  }
+
+  private setError(message: string) {
+    if (this.errorEl) this.errorEl.setText(message);
+  }
+
   onClose() { this.contentEl.empty(); }
 }
 
@@ -48,6 +154,7 @@ export class DashboardView extends ItemView {
   private timer: number | null = null;
   private snakeRouteCache: SnakeRouteCache | null = null;
   private snakeReplayTimer: number | null = null;
+  private scopedVisibleCounts: Partial<Record<ScopedTodoItem["scope"], number>> = {};
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -65,11 +172,12 @@ export class DashboardView extends ItemView {
     contentEl.empty();
     contentEl.addClass("ts-dash");
 
-    const [wsIndex, productMd, activity, todos, todayWorklog] = await Promise.all([
+    const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog] = await Promise.all([
       loadWorkspaceIndex(this.app),
       loadProductStatus(this.app),
       getDailyActivity(this.app, 365),
       loadTodos(this.app),
+      loadScopedTodos(this.app),
       loadTodayWorklog(this.app),
     ]);
 
@@ -130,6 +238,15 @@ export class DashboardView extends ItemView {
     if (pending.length > 0) tdMeta.setText(`${pending.length} pending`);
     this.renderTodos(todoCard, todos);
 
+    // LEFT: scoped tasks
+    if (scopedTodos.length > 0) {
+      const scopedCard = left.createDiv({ cls: "ts-card ts-scoped-card" });
+      const scopedHd = scopedCard.createDiv({ cls: "ts-card-head" });
+      scopedHd.createSpan({ cls: "ts-card-label", text: "UPCOMING TASKS" });
+      scopedHd.createSpan({ cls: "ts-card-meta", text: `${scopedTodos.length} open` });
+      this.renderScopedTodos(scopedCard, scopedTodos);
+    }
+
     // RIGHT: today's worklog
     if (todayWorklog) {
       const logCard = right.createDiv({ cls: "ts-card" });
@@ -140,7 +257,7 @@ export class DashboardView extends ItemView {
     }
 
     // RIGHT: quick actions (高频操作前置)
-    const actCard = right.createDiv({ cls: "ts-card" });
+    const actCard = right.createDiv({ cls: "ts-card ts-quick-card" });
     actCard.createDiv({ cls: "ts-card-label", text: "QUICK" });
     this.renderActions(actCard);
 
@@ -210,6 +327,63 @@ export class DashboardView extends ItemView {
       list.createDiv({ cls: "ts-todo-done-hint", text: `✓ ${done.length} completed` });
   }
 
+  private renderScopedTodos(parent: HTMLElement, items: ScopedTodoItem[]) {
+    const labels: Record<ScopedTodoItem["scope"], string> = {
+      week: "本周",
+      month: "本月",
+      longterm: "长期",
+      custom: "指定日期",
+    };
+    const order: Array<ScopedTodoItem["scope"]> = ["week", "month", "custom", "longterm"];
+    const list = parent.createDiv({ cls: "ts-scoped-list" });
+
+    for (const scope of order) {
+      const group = items.filter(item => item.scope === scope);
+      if (group.length === 0) continue;
+      const visibleCount = this.scopedVisibleCounts[scope] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
+      const visibleItems = group.slice(0, visibleCount);
+      const remaining = getRemainingCount(group.length, visibleItems.length);
+
+      const sec = list.createDiv({ cls: "ts-scoped-section" });
+      const head = sec.createDiv({ cls: "ts-scoped-section-head" });
+      head.createSpan({ text: labels[scope], cls: "ts-scoped-section-title" });
+      head.createSpan({ text: `${group.length}`, cls: "ts-scoped-section-count" });
+
+      for (const item of visibleItems) {
+        const row = sec.createDiv({ cls: "ts-scoped-row" });
+        row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
+
+        const info = row.createDiv({ cls: "ts-scoped-info" });
+        info.createDiv({ text: item.text, cls: "ts-scoped-text" });
+        const metaParts = [
+          ...item.tags.map(tag => `#${tag}`),
+          ...(item.periodRange ? [`📆 ${item.periodRange}`] : []),
+          ...(item.dueDate ? [`📅 ${item.dueDate}`] : []),
+        ];
+        if (metaParts.length > 0) info.createDiv({ text: metaParts.join(" "), cls: "ts-scoped-meta" });
+
+        const addBtn = row.createEl("button", { text: "加入今日", cls: "ts-scoped-add" });
+        addBtn.type = "button";
+        addBtn.addEventListener("click", async e => {
+          e.stopPropagation();
+          await addScopedTodoToToday(this.app, item);
+          await this.refreshTodoSection();
+          addBtn.setText("已加入");
+          addBtn.disabled = true;
+        });
+      }
+
+      if (remaining > 0) {
+        const more = sec.createDiv({ cls: "ts-todo-more", text: `+${remaining} more` });
+        more.addEventListener("click", e => {
+          e.stopPropagation();
+          this.scopedVisibleCounts[scope] = getNextVisibleCount(visibleItems.length, group.length);
+          this.render();
+        });
+      }
+    }
+  }
+
   private renderTodoRow(parent: HTMLElement, item: TodoItem) {
     const row = parent.createDiv({ cls: `ts-todo-row${item.done ? " ts-todo-done" : ""}` });
     const chk = row.createEl("span", { cls: "ts-todo-chk", text: item.done ? "☑" : "☐" });
@@ -218,8 +392,9 @@ export class DashboardView extends ItemView {
     // checkbox 单击 = 切换完成状态（原地更新，无全页刷新）
     chk.addEventListener("click", async e => {
       e.stopPropagation();
+      const targetDone = !item.done;
       // 乐观更新：先改 DOM，再写文件
-      item.done = !item.done;
+      item.done = targetDone;
       chk.setText(item.done ? "☑" : "☐");
       if (item.done) row.addClass("ts-todo-done");
       else           row.removeClass("ts-todo-done");
@@ -232,7 +407,7 @@ export class DashboardView extends ItemView {
           meta.setText(pendingCount > 0 ? `${pendingCount} pending` : "");
         }
       }
-      await toggleTodoInWorklog(this.app, item);
+      await toggleTodoInWorklog(this.app, item, targetDone);
     });
 
     // 单击行 = 打开文件（detail >= 2 时忽略，让 dblclick 接管）
@@ -256,6 +431,9 @@ export class DashboardView extends ItemView {
       // 阻止 input 上的所有点击冒泡到 row，防止触发 openFile
       input.addEventListener("click",     e => e.stopPropagation());
       input.addEventListener("mousedown", e => e.stopPropagation());
+      let isEditingComposing = false;
+      input.addEventListener("compositionstart", () => { isEditingComposing = true; });
+      input.addEventListener("compositionend", () => { isEditingComposing = false; });
 
       let saved = false;
       const save = async () => {
@@ -272,7 +450,7 @@ export class DashboardView extends ItemView {
       };
 
       input.addEventListener("keydown", async ev => {
-        if (ev.key === "Enter")  { ev.preventDefault(); await save(); }
+        if (shouldSubmitOnEnter(ev, isEditingComposing))  { ev.preventDefault(); await save(); }
         if (ev.key === "Escape") {
           saved = true;
           // 取消：原地恢复原始 span
@@ -402,9 +580,10 @@ export class DashboardView extends ItemView {
     else this.openWorkspace("02-日记");
   }
   private openTodoModal() {
-    new TodoModal(this.app, async (text) => {
-      await addTodoToWorklog(this.app, text);
-      await this.refreshTodoSection();
+    new TodoModal(this.app, async (input) => {
+      await addScopedTodo(this.app, input);
+      if (input.scope === "today") await this.refreshTodoSection();
+      else await this.render();
     }).open();
   }
 
