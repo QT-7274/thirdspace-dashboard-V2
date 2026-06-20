@@ -425,26 +425,32 @@ export async function addTodoToWorklog(app: App, text: string): Promise<void> {
   await app.vault.modify(f, lines.join("\n"));
 }
 
-export async function toggleTodoInWorklog(app: App, item: TodoItem): Promise<void> {
-  const path = getTodayWorklogPath();
-  const f = app.vault.getAbstractFileByPath(path) as TFile | null;
-  if (!f) return;
-  const md = await app.vault.read(f);
-  const today = localDateStr(new Date());
+export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean, doneDate: string): string {
   const lines = md.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
     const cleaned = m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,"").trim();
     if (cleaned !== item.text) continue;
-    if (item.done) {
-      lines[i] = lines[i].replace(/^- \[x\]/, "- [ ]").replace(/ ✅ \d{4}-\d{2}-\d{2}/g,"");
+
+    if (targetDone) {
+      const withoutDate = lines[i].replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
+      lines[i] = withoutDate.replace(/^- \[[ x]\]/, "- [x]") + ` ✅ ${doneDate}`;
     } else {
-      lines[i] = lines[i].replace(/^- \[ \]/, "- [x]") + ` ✅ ${today}`;
+      lines[i] = lines[i].replace(/^- \[[ x]\]/, "- [ ]").replace(/ ✅ \d{4}-\d{2}-\d{2}/g,"");
     }
-    await app.vault.modify(f, lines.join("\n"));
-    return;
+    break;
   }
+  return lines.join("\n");
+}
+
+export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone = !item.done): Promise<void> {
+  const path = getTodayWorklogPath();
+  const f = app.vault.getAbstractFileByPath(path) as TFile | null;
+  if (!f) return;
+  const md = await app.vault.read(f);
+  const today = localDateStr(new Date());
+  await app.vault.modify(f, setTodoDoneInMd(md, item, targetDone, today));
 }
 
 export async function renameTodoInWorklog(app: App, item: TodoItem, newText: string): Promise<void> {

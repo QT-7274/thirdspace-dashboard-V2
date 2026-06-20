@@ -104,3 +104,23 @@ test("buildTaskPoolTemplate creates stable sections and first scoped task", asyn
   assert.match(md, /^# Tasks\n\n/);
   assert.match(md, /## 本周\n\n## 本月\n\n## 长期\n- \[ \] 研究 Obsidian Tasks 兼容 #插件 #task\/scope-longterm\n\n## 指定日期\n$/);
 });
+
+test("setTodoDoneInMd writes the requested target state", async () => {
+  const { setTodoDoneInMd } = await loadVaultReader();
+
+  const checked = setTodoDoneInMd(
+    "## 今日Todo\n- [ ] 写插件 PR\n",
+    { text: "写插件 PR", done: true },
+    true,
+    "2026-06-20",
+  );
+  assert.equal(checked, "## 今日Todo\n- [x] 写插件 PR ✅ 2026-06-20\n");
+
+  const unchecked = setTodoDoneInMd(
+    "## 今日Todo\n- [x] 写插件 PR ✅ 2026-06-20\n",
+    { text: "写插件 PR", done: false },
+    false,
+    "2026-06-20",
+  );
+  assert.equal(unchecked, "## 今日Todo\n- [ ] 写插件 PR\n");
+});

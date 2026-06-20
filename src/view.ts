@@ -384,8 +384,9 @@ export class DashboardView extends ItemView {
     // checkbox 单击 = 切换完成状态（原地更新，无全页刷新）
     chk.addEventListener("click", async e => {
       e.stopPropagation();
+      const targetDone = !item.done;
       // 乐观更新：先改 DOM，再写文件
-      item.done = !item.done;
+      item.done = targetDone;
       chk.setText(item.done ? "☑" : "☐");
       if (item.done) row.addClass("ts-todo-done");
       else           row.removeClass("ts-todo-done");
@@ -398,7 +399,7 @@ export class DashboardView extends ItemView {
           meta.setText(pendingCount > 0 ? `${pendingCount} pending` : "");
         }
       }
-      await toggleTodoInWorklog(this.app, item);
+      await toggleTodoInWorklog(this.app, item, targetDone);
     });
 
     // 单击行 = 打开文件（detail >= 2 时忽略，让 dblclick 接管）
