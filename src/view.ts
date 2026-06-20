@@ -12,6 +12,7 @@ import {
 import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
 import { shouldSubmitOnEnter } from "./utils/keyboard";
+import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getNextVisibleCount, getRemainingCount } from "./utils/pagination";
 
 export const VIEW_TYPE = "thirdspace-dashboard";
 
@@ -153,6 +154,7 @@ export class DashboardView extends ItemView {
   private timer: number | null = null;
   private snakeRouteCache: SnakeRouteCache | null = null;
   private snakeReplayTimer: number | null = null;
+  private scopedVisibleCounts: Partial<Record<ScopedTodoItem["scope"], number>> = {};
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -334,18 +336,20 @@ export class DashboardView extends ItemView {
     };
     const order: Array<ScopedTodoItem["scope"]> = ["week", "month", "custom", "longterm"];
     const list = parent.createDiv({ cls: "ts-scoped-list" });
-    const SHOW_PER_GROUP = 4;
 
     for (const scope of order) {
       const group = items.filter(item => item.scope === scope);
       if (group.length === 0) continue;
+      const visibleCount = this.scopedVisibleCounts[scope] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
+      const visibleItems = group.slice(0, visibleCount);
+      const remaining = getRemainingCount(group.length, visibleItems.length);
 
       const sec = list.createDiv({ cls: "ts-scoped-section" });
       const head = sec.createDiv({ cls: "ts-scoped-section-head" });
       head.createSpan({ text: labels[scope], cls: "ts-scoped-section-title" });
       head.createSpan({ text: `${group.length}`, cls: "ts-scoped-section-count" });
 
-      for (const item of group.slice(0, SHOW_PER_GROUP)) {
+      for (const item of visibleItems) {
         const row = sec.createDiv({ cls: "ts-scoped-row" });
         row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
 
@@ -369,9 +373,13 @@ export class DashboardView extends ItemView {
         });
       }
 
-      if (group.length > SHOW_PER_GROUP) {
-        const more = sec.createDiv({ cls: "ts-todo-more", text: `+${group.length - SHOW_PER_GROUP} more` });
-        more.addEventListener("click", () => this.openFile(getTaskPoolPath()));
+      if (remaining > 0) {
+        const more = sec.createDiv({ cls: "ts-todo-more", text: `+${remaining} more` });
+        more.addEventListener("click", e => {
+          e.stopPropagation();
+          this.scopedVisibleCounts[scope] = getNextVisibleCount(visibleItems.length, group.length);
+          this.render();
+        });
       }
     }
   }

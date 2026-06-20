@@ -450,7 +450,8 @@ export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone =
   if (!f) return;
   const md = await app.vault.read(f);
   const today = localDateStr(new Date());
-  await app.vault.modify(f, setTodoDoneInMd(md, item, targetDone, today));
+  const next = setTodoDoneInMd(md, item, targetDone, today);
+  if (next !== md) await app.vault.modify(f, next);
 }
 
 export async function renameTodoInWorklog(app: App, item: TodoItem, newText: string): Promise<void> {

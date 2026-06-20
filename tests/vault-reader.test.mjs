@@ -124,3 +124,20 @@ test("setTodoDoneInMd writes the requested target state", async () => {
   );
   assert.equal(unchecked, "## 今日Todo\n- [ ] 写插件 PR\n");
 });
+
+test("toggleTodoInWorklog skips vault.modify when no todo matches", async () => {
+  const { toggleTodoInWorklog } = await loadVaultReader();
+  const file = { path: "today.md" };
+  let modifyCalls = 0;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => file,
+      read: async () => "## 今日Todo\n- [ ] 已存在任务\n",
+      modify: async () => { modifyCalls += 1; },
+    },
+  };
+
+  await toggleTodoInWorklog(app, { text: "不存在任务", done: false }, true);
+
+  assert.equal(modifyCalls, 0);
+});
