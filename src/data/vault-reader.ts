@@ -30,10 +30,10 @@ function fileModified(app: App, f: TFile): number {
 export interface WorkspaceEntry  { dir: string; skill: string; desc: string; }
 export interface WorkspaceStats  { dir: string; icon: string; desc: string; fileCount: number; lastModified: number; }
 export interface DailyActivity   { date: string; count: number; }
-export interface TodoItem        { text: string; done: boolean; }
+export interface TodoItem        { text: string; done: boolean; taskId?: string; }
 export type TaskScope            = "today" | "week" | "month" | "longterm" | "custom";
-export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; }
-export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; }
+export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; taskId?: string; }
+export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; }
 export interface VaultStats      { total: number; thisWeek: number; thisMonth: number; activeDays: number; }
 export interface WorklogEntry    { time: string; title: string; }
 export interface TodayWorklog    { highlights: string[]; entries: WorklogEntry[]; }
@@ -210,8 +210,9 @@ export function parseTodosFromMd(md: string): TodoItem[] {
     if (!inTodoSection) continue;
     const m = line.match(/^- \[( |x)\] (.+)/);
     if (m) {
-      const text = m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,"").trim();
-      if (text) items.push({ text, done: m[1]==="x" });
+      const taskId = parseTaskId(m[2]);
+      const text = stripTaskId(m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,""));
+      if (text) items.push({ text, done: m[1]==="x", ...(taskId ? { taskId } : {}) });
     }
   }
   return items;
@@ -236,6 +237,18 @@ function uniqueTags(tags: string[] = []): string[] {
 
 function isValidDueDate(dueDate: string | undefined): dueDate is string {
   return !!dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate);
+}
+
+function createTaskId(): string {
+  return `ts-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseTaskId(text: string): string | undefined {
+  return text.match(/(?:^|\s)\^(ts-[A-Za-z0-9_-]+)/)?.[1];
+}
+
+function stripTaskId(text: string): string {
+  return text.replace(/(?:^|\s)\^ts-[A-Za-z0-9_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): string | undefined {
@@ -265,7 +278,8 @@ function formatTodayTodoText(input: ScopedTodoInput | ScopedTodoItem): string {
   const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
   const dateText = isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
   const rangeText = "periodRange" in input && input.periodRange ? ` 📆 ${input.periodRange}` : "";
-  return `${input.text.trim()}${tagText}${rangeText}${dateText}`;
+  const idText = input.taskId ? ` ^${input.taskId}` : "";
+  return `${input.text.trim()}${tagText}${rangeText}${dateText}${idText}`;
 }
 
 export function formatScopedTodoLine(input: ScopedTodoInput, baseDate = new Date()): string {
@@ -274,7 +288,8 @@ export function formatScopedTodoLine(input: ScopedTodoInput, baseDate = new Date
   const periodRange = getScopeDateRange(input.scope, baseDate);
   const rangeText = periodRange ? ` 📆 ${periodRange}` : "";
   const dateText = input.scope === "custom" && isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
-  return `- [ ] ${input.text.trim()}${tagText}${rangeText}${dateText}`;
+  const idText = input.taskId ? ` ^${input.taskId}` : "";
+  return `- [ ] ${input.text.trim()}${tagText}${rangeText}${dateText}${idText}`;
 }
 
 export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
@@ -295,6 +310,7 @@ export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
     if (done) continue;
 
     const body = checkbox[2];
+    const taskId = parseTaskId(body);
     const dueDate = body.match(/📅\s*(\d{4}-\d{2}-\d{2})/)?.[1];
     const periodRange = body.match(/📆\s*(\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2})/)?.[1];
     const tags = Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g))
@@ -305,6 +321,7 @@ export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
       .replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "")
       .replace(/📆\s*\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2}/g, "")
       .replace(/(?:^|\s)#[^\s#]+/g, " ")
+      .replace(/(?:^|\s)\^ts-[A-Za-z0-9_-]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -315,6 +332,7 @@ export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
       tags: uniqueTags(tags),
       ...(periodRange ? { periodRange } : {}),
       ...(dueDate ? { dueDate } : {}),
+      ...(taskId ? { taskId } : {}),
     });
   }
 
@@ -361,6 +379,67 @@ function insertScopedTodoIntoMd(md: string, input: ScopedTodoInput): string {
   return `${lines.join("\n").replace(/\s*$/, "")}\n`;
 }
 
+function addTaskIdToScopedTodoInMd(md: string, item: ScopedTodoItem, taskId: string): string {
+  const lines = md.split("\n");
+  let scope: Exclude<TaskScope, "today"> | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      scope = TASK_SCOPE_BY_LABEL[heading[1]] ?? null;
+      continue;
+    }
+    if (scope !== item.scope) continue;
+
+    const checkbox = lines[i].match(/^- \[( |x)\]\s+(.+)/);
+    if (!checkbox || checkbox[1] === "x") continue;
+    if (parseTaskId(checkbox[2])) continue;
+
+    const parsed = parseScopedTodosFromMd(`## ${TASK_SCOPE_LABELS[scope]}\n${lines[i]}`);
+    const candidate = parsed[0];
+    if (!candidate) continue;
+    if (candidate.text !== item.text) continue;
+    if ((candidate.periodRange ?? "") !== (item.periodRange ?? "")) continue;
+    if ((candidate.dueDate ?? "") !== (item.dueDate ?? "")) continue;
+
+    lines[i] = `${lines[i]} ^${taskId}`;
+    break;
+  }
+
+  return lines.join("\n");
+}
+
+async function ensureScopedTodoId(app: App, item: ScopedTodoItem, taskId: string): Promise<void> {
+  const f = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
+  if (!f) return;
+  const md = await app.vault.read(f);
+  const next = addTaskIdToScopedTodoInMd(md, item, taskId);
+  if (next !== md) await app.vault.modify(f, next);
+}
+
+export function setTaskPoolTodoDoneInMd(md: string, taskId: string, targetDone: boolean, doneDate: string): string {
+  const lines = md.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!new RegExp(`(?:^|\\s)\\^${taskId}(?:\\s|$)`).test(lines[i])) continue;
+    if (targetDone) {
+      const withoutDate = lines[i].replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
+      lines[i] = withoutDate.replace(/^- \[[ x]\]/, "- [x]") + ` ✅ ${doneDate}`;
+    } else {
+      lines[i] = lines[i].replace(/^- \[[ x]\]/, "- [ ]").replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
+    }
+    break;
+  }
+  return lines.join("\n");
+}
+
+async function syncTaskPoolTodoDone(app: App, taskId: string, targetDone: boolean, doneDate: string): Promise<void> {
+  const f = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
+  if (!f) return;
+  const md = await app.vault.read(f);
+  const next = setTaskPoolTodoDoneInMd(md, taskId, targetDone, doneDate);
+  if (next !== md) await app.vault.modify(f, next);
+}
+
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
   if (app.vault.getAbstractFileByPath(folderPath)) return;
   try { await app.vault.createFolder(folderPath); } catch {}
@@ -384,19 +463,23 @@ export async function addScopedTodo(app: App, input: ScopedTodoInput): Promise<v
     return;
   }
 
+  const scopedInput = { ...input, text, taskId: input.taskId ?? createTaskId() };
+
   await ensureFolder(app, TASK_POOL_PATH.split("/").slice(0, -1).join("/"));
   let f = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
   if (!f) {
-    f = await app.vault.create(TASK_POOL_PATH, buildTaskPoolTemplate({ ...input, text }));
+    f = await app.vault.create(TASK_POOL_PATH, buildTaskPoolTemplate(scopedInput));
     return;
   }
 
   const md = await app.vault.read(f);
-  await app.vault.modify(f, insertScopedTodoIntoMd(md, { ...input, text }));
+  await app.vault.modify(f, insertScopedTodoIntoMd(md, scopedInput));
 }
 
 export async function addScopedTodoToToday(app: App, item: ScopedTodoItem): Promise<void> {
-  await addTodoToWorklog(app, formatTodayTodoText(item));
+  const taskId = item.taskId ?? createTaskId();
+  if (!item.taskId) await ensureScopedTodoId(app, item, taskId);
+  await addTodoToWorklog(app, formatTodayTodoText({ ...item, taskId }));
 }
 
 export async function addTodoToWorklog(app: App, text: string): Promise<void> {
@@ -430,7 +513,7 @@ export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean,
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
-    const cleaned = m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,"").trim();
+    const cleaned = stripTaskId(m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,""));
     if (cleaned !== item.text) continue;
 
     if (targetDone) {
@@ -451,7 +534,10 @@ export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone =
   const md = await app.vault.read(f);
   const today = localDateStr(new Date());
   const next = setTodoDoneInMd(md, item, targetDone, today);
-  if (next !== md) await app.vault.modify(f, next);
+  if (next !== md) {
+    await app.vault.modify(f, next);
+    if (item.taskId) await syncTaskPoolTodoDone(app, item.taskId, targetDone, today);
+  }
 }
 
 export async function renameTodoInWorklog(app: App, item: TodoItem, newText: string): Promise<void> {

@@ -41,7 +41,7 @@ test("parseScopedTodosFromMd returns only unchecked tasks grouped by section", a
   const { parseScopedTodosFromMd } = await loadVaultReader();
 
   const items = parseScopedTodosFromMd(`## 本周
-- [ ] 整理插件 Todo 需求 #插件 #task/scope-week 📆 2026-06-15 到 2026-06-21
+- [ ] 整理插件 Todo 需求 #插件 #task/scope-week 📆 2026-06-15 到 2026-06-21 ^ts-week-1
 - [x] 已完成的周任务 #task/scope-week ✅ 2026-06-18
 
 ## 本月
@@ -58,6 +58,7 @@ test("parseScopedTodosFromMd returns only unchecked tasks grouped by section", a
       scope: "week",
       tags: ["插件"],
       periodRange: "2026-06-15 到 2026-06-21",
+      taskId: "ts-week-1",
     },
     {
       text: "完成长期任务面板",
@@ -123,6 +124,25 @@ test("setTodoDoneInMd writes the requested target state", async () => {
     "2026-06-20",
   );
   assert.equal(unchecked, "## 今日Todo\n- [ ] 写插件 PR\n");
+});
+
+test("parseTodosFromMd extracts task ids without polluting todo text", async () => {
+  const { parseTodosFromMd } = await loadVaultReader();
+
+  assert.deepEqual(parseTodosFromMd("## 今日Todo\n- [ ] 注册 linkin #学习 ^ts-week-1\n"), [
+    { text: "注册 linkin #学习", done: false, taskId: "ts-week-1" },
+  ]);
+});
+
+test("setTaskPoolTodoDoneInMd updates the linked source task by id", async () => {
+  const { setTaskPoolTodoDoneInMd } = await loadVaultReader();
+  const md = "## 本周\n- [ ] 注册 linkin #学习 #task/scope-week ^ts-week-1\n";
+
+  const checked = setTaskPoolTodoDoneInMd(md, "ts-week-1", true, "2026-06-21");
+  assert.equal(checked, "## 本周\n- [x] 注册 linkin #学习 #task/scope-week ^ts-week-1 ✅ 2026-06-21\n");
+
+  const unchanged = setTaskPoolTodoDoneInMd(md, "missing", true, "2026-06-21");
+  assert.equal(unchanged, md);
 });
 
 test("toggleTodoInWorklog skips vault.modify when no todo matches", async () => {
