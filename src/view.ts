@@ -408,6 +408,7 @@ export class DashboardView extends ItemView {
         }
       }
       await toggleTodoInWorklog(this.app, item, targetDone);
+      if (item.taskId) await this.render();
     });
 
     // 单击行 = 打开文件（detail >= 2 时忽略，让 dblclick 接管）
