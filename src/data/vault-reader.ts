@@ -30,7 +30,7 @@ function fileModified(app: App, f: TFile): number {
 export interface WorkspaceEntry  { dir: string; skill: string; desc: string; }
 export interface WorkspaceStats  { dir: string; icon: string; desc: string; fileCount: number; lastModified: number; }
 export interface DailyActivity   { date: string; count: number; }
-export interface TodoItem        { text: string; done: boolean; taskId?: string; }
+export interface TodoItem        { text: string; done: boolean; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; }
 export type TaskScope            = "today" | "week" | "month" | "longterm" | "custom";
 export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; taskId?: string; }
 export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; }
@@ -75,6 +75,7 @@ const TASK_SCOPE_BY_LABEL: Record<string, Exclude<TaskScope, "today">> = {
   "长期": "longterm",
   "指定日期": "custom",
 };
+const WORK_TODO_TAG = "工作";
 
 // ── Worklog path helper ──────────────────────────────────────
 export function getTodayWorklogPath(): string {
@@ -210,9 +211,8 @@ export function parseTodosFromMd(md: string): TodoItem[] {
     if (!inTodoSection) continue;
     const m = line.match(/^- \[( |x)\] (.+)/);
     if (m) {
-      const taskId = parseTaskId(m[2]);
-      const text = stripTaskId(m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,""));
-      if (text) items.push({ text, done: m[1]==="x", ...(taskId ? { taskId } : {}) });
+      const parsed = parseTodoBody(m[2]);
+      if (parsed.text) items.push({ ...parsed, done: m[1]==="x" });
     }
   }
   return items;
@@ -235,6 +235,11 @@ function uniqueTags(tags: string[] = []): string[] {
   return result;
 }
 
+export function isWorkTodo(item: { tags?: string[] }): boolean {
+  // work-todo-board.COMPATIBILITY.1
+  return uniqueTags(item.tags).includes(WORK_TODO_TAG);
+}
+
 function isValidDueDate(dueDate: string | undefined): dueDate is string {
   return !!dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate);
 }
@@ -249,6 +254,31 @@ function parseTaskId(text: string): string | undefined {
 
 function stripTaskId(text: string): string {
   return text.replace(/(?:^|\s)\^ts-[A-Za-z0-9_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseTodoBody(body: string): Omit<TodoItem, "done"> {
+  const taskId = parseTaskId(body);
+  const dueDate = body.match(/📅\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+  const periodRange = body.match(/📆\s*(\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2})/)?.[1];
+  const tags = Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g))
+    .map(match => match[1])
+    .filter(tag => !tag.startsWith("task/scope-"));
+  const text = body
+    .replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "")
+    .replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "")
+    .replace(/📆\s*\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2}/g, "")
+    .replace(/(?:^|\s)#[^\s#]+/g, " ")
+    .replace(/(?:^|\s)\^ts-[A-Za-z0-9_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    text,
+    tags: uniqueTags(tags),
+    ...(periodRange ? { periodRange } : {}),
+    ...(dueDate ? { dueDate } : {}),
+    ...(taskId ? { taskId } : {}),
+  };
 }
 
 export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): string | undefined {
@@ -513,8 +543,7 @@ export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean,
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
-    const cleaned = stripTaskId(m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,""));
-    if (cleaned !== item.text) continue;
+    if (parseTodoBody(m[2]).text !== item.text) continue;
 
     if (targetDone) {
       const withoutDate = lines[i].replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
@@ -549,11 +578,15 @@ export async function renameTodoInWorklog(app: App, item: TodoItem, newText: str
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^(- \[[ x]\] )(.+)/);
     if (!m) continue;
-    const cleaned = m[2].replace(/✅ \d{4}-\d{2}-\d{2}/g,"").trim();
-    if (cleaned !== item.text) continue;
+    const parsed = parseTodoBody(m[2]);
+    if (parsed.text !== item.text) continue;
     // 保留完成状态和 ✅ 日期
     const doneDate = m[2].match(/ ✅ \d{4}-\d{2}-\d{2}/)?.[0] ?? "";
-    lines[i] = `${m[1]}${newText}${doneDate}`;
+    const tagText = parsed.tags.length ? ` ${parsed.tags.map(tag => `#${tag}`).join(" ")}` : "";
+    const rangeText = parsed.periodRange ? ` 📆 ${parsed.periodRange}` : "";
+    const dateText = parsed.dueDate ? ` 📅 ${parsed.dueDate}` : "";
+    const idText = parsed.taskId ? ` ^${parsed.taskId}` : "";
+    lines[i] = `${m[1]}${newText}${tagText}${rangeText}${dateText}${idText}${doneDate}`;
     await app.vault.modify(f, lines.join("\n"));
     return;
   }

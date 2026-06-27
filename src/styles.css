@@ -371,6 +371,10 @@
   min-width: 0;
 }
 body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--ink); }
+.ts-todo-body {
+  flex: 1;
+  min-width: 0;
+}
 .ts-todo-txt {
   font-size: 11.5px;
   color: var(--ink);
@@ -414,6 +418,12 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
 }
 
 /* ── Scoped tasks ─────────────────────────────────────────── */
+.ts-work-card {
+  border-color: rgba(181,57,42,.22);
+}
+.ts-work-card .ts-card-label {
+  color: var(--rust);
+}
 .ts-scoped-list { display: flex; flex-direction: column; gap: 8px; }
 .ts-scoped-section {
   border: 1px solid var(--border);
@@ -463,10 +473,27 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   font-size: 9px;
   color: var(--muted);
   margin-top: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 5px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
+.ts-tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 1px 5px;
+  line-height: 1.35;
+}
+.ts-tag--work {
+  border-color: rgba(181,57,42,.45);
+  background: var(--rust-lo);
+  color: var(--rust);
+  font-weight: 700;
+}
+.ts-scoped-date { line-height: 1.35; }
 .ts-scoped-add {
   border: 1px solid var(--border);
   border-radius: 999px;

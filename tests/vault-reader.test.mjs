@@ -77,6 +77,15 @@ test("parseScopedTodosFromMd returns only unchecked tasks grouped by section", a
   ]);
 });
 
+test("work-todo-board.COMPATIBILITY.1 isWorkTodo matches only the exact 工作 tag", async () => {
+  const { isWorkTodo } = await loadVaultReader();
+
+  assert.equal(isWorkTodo({ tags: ["工作"] }), true);
+  assert.equal(isWorkTodo({ tags: ["项目", "工作"] }), true);
+  assert.equal(isWorkTodo({ tags: ["工作流"] }), false);
+  assert.equal(isWorkTodo({ tags: ["项目"] }), false);
+});
+
 test("formatScopedTodoLine stores real date ranges for week and month tasks", async () => {
   const { formatScopedTodoLine, getScopeDateRange } = await loadVaultReader();
   const baseDate = new Date("2026-06-18T12:00:00");
@@ -130,7 +139,15 @@ test("parseTodosFromMd extracts task ids without polluting todo text", async () 
   const { parseTodosFromMd } = await loadVaultReader();
 
   assert.deepEqual(parseTodosFromMd("## 今日Todo\n- [ ] 注册 linkin #学习 ^ts-week-1\n"), [
-    { text: "注册 linkin #学习", done: false, taskId: "ts-week-1" },
+    { text: "注册 linkin", done: false, tags: ["学习"], taskId: "ts-week-1" },
+  ]);
+});
+
+test("work-todo-board.TAG_DISPLAY.2 parseTodosFromMd extracts tags from today's todo title", async () => {
+  const { parseTodosFromMd } = await loadVaultReader();
+
+  assert.deepEqual(parseTodosFromMd("## 今日Todo\n- [ ] edgeone pages 控制台发布 #工作\n"), [
+    { text: "edgeone pages 控制台发布", done: false, tags: ["工作"] },
   ]);
 });
 

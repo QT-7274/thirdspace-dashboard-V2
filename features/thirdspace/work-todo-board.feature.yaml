@@ -1,0 +1,21 @@
+feature:
+  name: work-todo-board
+  product: thirdspace-dashboard
+  description: Show tagged work todos as a distinct dashboard group while preserving markdown task compatibility.
+
+components:
+  WORK_BOARD:
+    requirements:
+      1: Dashboard separates open scoped todos tagged with `#工作` into a dedicated work todo card.
+      2: Work scoped todos do not also appear in the general upcoming tasks card.
+      3: The dedicated work todo card keeps the same open-file and add-to-today behavior as general scoped tasks.
+
+  TAG_DISPLAY:
+    requirements:
+      1: The `#工作` tag is visually more prominent than other todo tags when rendered on the dashboard.
+      2: Today's todo rows render markdown tags as metadata chips instead of mixing them into the todo title.
+
+constraints:
+  COMPATIBILITY:
+    requirements:
+      1: Work todo detection is based on an exact normalized `工作` tag, without changing the existing markdown task format.

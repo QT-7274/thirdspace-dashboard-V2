@@ -5,7 +5,7 @@ import {
   loadProductStatus, parseProducts, getRecentFiles,
   localDateStr, localDateCompact, localTimestamp,
   loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath, getTaskPoolPath,
-  loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog,
+  loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog, isWorkTodo,
   type WorkspaceStats, type TodoItem, type VaultStats, type TodayWorklog,
   type ScopedTodoInput, type ScopedTodoItem, type TaskScope,
 } from "./data/vault-reader";
@@ -154,7 +154,7 @@ export class DashboardView extends ItemView {
   private timer: number | null = null;
   private snakeRouteCache: SnakeRouteCache | null = null;
   private snakeReplayTimer: number | null = null;
-  private scopedVisibleCounts: Partial<Record<ScopedTodoItem["scope"], number>> = {};
+  private scopedVisibleCounts: Record<string, number> = {};
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -188,6 +188,9 @@ export class DashboardView extends ItemView {
     const products  = productMd ? parseProducts(productMd) : [];
     const snakeCells = buildSnakeCells(activity);
     const pending   = todos.filter(t => !t.done);
+    // work-todo-board.WORK_BOARD.1 work-todo-board.WORK_BOARD.2
+    const workScopedTodos = scopedTodos.filter(isWorkTodo);
+    const upcomingScopedTodos = scopedTodos.filter(item => !isWorkTodo(item));
 
     // ── Header
     const hdr = contentEl.createDiv({ cls: "ts-hdr" });
@@ -238,13 +241,22 @@ export class DashboardView extends ItemView {
     if (pending.length > 0) tdMeta.setText(`${pending.length} pending`);
     this.renderTodos(todoCard, todos);
 
+    // LEFT: work scoped tasks
+    if (workScopedTodos.length > 0) {
+      const workCard = left.createDiv({ cls: "ts-card ts-scoped-card ts-work-card" });
+      const workHd = workCard.createDiv({ cls: "ts-card-head" });
+      workHd.createSpan({ cls: "ts-card-label", text: "WORK TODOS" });
+      workHd.createSpan({ cls: "ts-card-meta", text: `${workScopedTodos.length} work` });
+      this.renderScopedTodos(workCard, workScopedTodos, "work");
+    }
+
     // LEFT: scoped tasks
-    if (scopedTodos.length > 0) {
+    if (upcomingScopedTodos.length > 0) {
       const scopedCard = left.createDiv({ cls: "ts-card ts-scoped-card" });
       const scopedHd = scopedCard.createDiv({ cls: "ts-card-head" });
       scopedHd.createSpan({ cls: "ts-card-label", text: "UPCOMING TASKS" });
-      scopedHd.createSpan({ cls: "ts-card-meta", text: `${scopedTodos.length} open` });
-      this.renderScopedTodos(scopedCard, scopedTodos);
+      scopedHd.createSpan({ cls: "ts-card-meta", text: `${upcomingScopedTodos.length} open` });
+      this.renderScopedTodos(scopedCard, upcomingScopedTodos, "upcoming");
     }
 
     // RIGHT: today's worklog
@@ -327,7 +339,7 @@ export class DashboardView extends ItemView {
       list.createDiv({ cls: "ts-todo-done-hint", text: `✓ ${done.length} completed` });
   }
 
-  private renderScopedTodos(parent: HTMLElement, items: ScopedTodoItem[]) {
+  private renderScopedTodos(parent: HTMLElement, items: ScopedTodoItem[], bucket = "upcoming") {
     const labels: Record<ScopedTodoItem["scope"], string> = {
       week: "本周",
       month: "本月",
@@ -340,7 +352,8 @@ export class DashboardView extends ItemView {
     for (const scope of order) {
       const group = items.filter(item => item.scope === scope);
       if (group.length === 0) continue;
-      const visibleCount = this.scopedVisibleCounts[scope] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
+      const visibleKey = `${bucket}:${scope}`;
+      const visibleCount = this.scopedVisibleCounts[visibleKey] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
       const visibleItems = group.slice(0, visibleCount);
       const remaining = getRemainingCount(group.length, visibleItems.length);
 
@@ -355,12 +368,7 @@ export class DashboardView extends ItemView {
 
         const info = row.createDiv({ cls: "ts-scoped-info" });
         info.createDiv({ text: item.text, cls: "ts-scoped-text" });
-        const metaParts = [
-          ...item.tags.map(tag => `#${tag}`),
-          ...(item.periodRange ? [`📆 ${item.periodRange}`] : []),
-          ...(item.dueDate ? [`📅 ${item.dueDate}`] : []),
-        ];
-        if (metaParts.length > 0) info.createDiv({ text: metaParts.join(" "), cls: "ts-scoped-meta" });
+        this.renderScopedMeta(info, item);
 
         const addBtn = row.createEl("button", { text: "加入今日", cls: "ts-scoped-add" });
         addBtn.type = "button";
@@ -377,17 +385,31 @@ export class DashboardView extends ItemView {
         const more = sec.createDiv({ cls: "ts-todo-more", text: `+${remaining} more` });
         more.addEventListener("click", e => {
           e.stopPropagation();
-          this.scopedVisibleCounts[scope] = getNextVisibleCount(visibleItems.length, group.length);
+          this.scopedVisibleCounts[visibleKey] = getNextVisibleCount(visibleItems.length, group.length);
           this.render();
         });
       }
     }
   }
 
+  private renderScopedMeta(parent: HTMLElement, item: { tags: string[]; periodRange?: string; dueDate?: string }) {
+    if (item.tags.length === 0 && !item.periodRange && !item.dueDate) return;
+
+    const meta = parent.createDiv({ cls: "ts-scoped-meta" });
+    for (const tag of item.tags) {
+      const tagEl = meta.createSpan({ text: `#${tag}`, cls: "ts-tag" });
+      if (tag === "工作") tagEl.addClass("ts-tag--work"); // work-todo-board.TAG_DISPLAY.1
+    }
+    if (item.periodRange) meta.createSpan({ text: `📆 ${item.periodRange}`, cls: "ts-scoped-date" });
+    if (item.dueDate) meta.createSpan({ text: `📅 ${item.dueDate}`, cls: "ts-scoped-date" });
+  }
+
   private renderTodoRow(parent: HTMLElement, item: TodoItem) {
     const row = parent.createDiv({ cls: `ts-todo-row${item.done ? " ts-todo-done" : ""}` });
     const chk = row.createEl("span", { cls: "ts-todo-chk", text: item.done ? "☑" : "☐" });
-    const txt = row.createSpan({ cls: "ts-todo-txt", text: item.text });
+    const body = row.createDiv({ cls: "ts-todo-body" });
+    const txt = body.createSpan({ cls: "ts-todo-txt", text: item.text });
+    this.renderScopedMeta(body, item); // work-todo-board.TAG_DISPLAY.2
 
     // checkbox 单击 = 切换完成状态（原地更新，无全页刷新）
     chk.addEventListener("click", async e => {
