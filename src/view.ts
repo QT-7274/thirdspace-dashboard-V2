@@ -6,6 +6,8 @@ import {
   localDateStr, localDateCompact, localTimestamp,
   loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath, getTaskPoolPath,
   loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog, isWorkTodo,
+  isTodoOverdue, sortTodosByUrgency, categorizeScopedOverdue,
+  loadCarryOverTodos, addCarryOverTodoToToday, deleteTodoFromWorklog,
   type WorkspaceStats, type TodoItem, type VaultStats, type TodayWorklog,
   type ScopedTodoInput, type ScopedTodoItem, type TaskScope,
 } from "./data/vault-reader";
@@ -99,6 +101,12 @@ class TodoModal extends Modal {
         this.dateInput?.focus();
         return;
       }
+      // todo-overdue-and-edge-cases.DATE_VALIDATION.1
+      if (this.selectedScope === "custom" && dueDate && dueDate < localDateStr(new Date())) {
+        this.setError("日期不能早于今天");
+        this.dateInput?.focus();
+        return;
+      }
       this.onSubmit({
         text: val,
         scope: this.selectedScope,
@@ -155,6 +163,9 @@ export class DashboardView extends ItemView {
   private snakeRouteCache: SnakeRouteCache | null = null;
   private snakeReplayTimer: number | null = null;
   private scopedVisibleCounts: Record<string, number> = {};
+  private isEditingTodo = false;
+  private refreshPending = false;
+  private carryOverCache: { date: string; items: TodoItem[] } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -164,7 +175,7 @@ export class DashboardView extends ItemView {
   getDisplayText() { return "ThirdSpace"; }
   getIcon()        { return "layout-dashboard"; }
 
-  async onOpen()  { this.containerEl.addClass("ts-root"); await this.render(); this.timer = window.setInterval(() => this.render(), 60_000); }
+  async onOpen()  { this.containerEl.addClass("ts-root"); await this.render(); this.timer = window.setInterval(() => { if (this.isEditingTodo) { this.refreshPending = true; return; } this.render(); }, 60_000); }
   onClose()       { if (this.timer) { clearInterval(this.timer); this.timer = null; } if (this.snakeReplayTimer) { clearTimeout(this.snakeReplayTimer); this.snakeReplayTimer = null; } return Promise.resolve(); }
 
   async render() {
@@ -172,13 +183,22 @@ export class DashboardView extends ItemView {
     contentEl.empty();
     contentEl.addClass("ts-dash");
 
-    const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog] = await Promise.all([
+    const todayStr = localDateStr(new Date());
+    const carryOverPromise = this.carryOverCache?.date === todayStr
+      ? Promise.resolve(this.carryOverCache.items)
+      : loadCarryOverTodos(this.app).then(items => {
+          this.carryOverCache = { date: todayStr, items };
+          return items;
+        });
+
+    const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog, carryOverTodos] = await Promise.all([
       loadWorkspaceIndex(this.app),
       loadProductStatus(this.app),
       getDailyActivity(this.app, 365),
       loadTodos(this.app),
       loadScopedTodos(this.app),
       loadTodayWorklog(this.app),
+      carryOverPromise,
     ]);
 
     const wsDirs    = wsIndex?.map(e => e.dir) ?? [];
@@ -188,9 +208,11 @@ export class DashboardView extends ItemView {
     const products  = productMd ? parseProducts(productMd) : [];
     const snakeCells = buildSnakeCells(activity);
     const pending   = todos.filter(t => !t.done);
+    // todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
+    const { overdue: overdueScoped, current: currentScoped } = categorizeScopedOverdue(scopedTodos);
     // work-todo-board.WORK_BOARD.1 work-todo-board.WORK_BOARD.2
-    const workScopedTodos = scopedTodos.filter(isWorkTodo);
-    const upcomingScopedTodos = scopedTodos.filter(item => !isWorkTodo(item));
+    const workScopedTodos = currentScoped.filter(isWorkTodo);
+    const upcomingScopedTodos = currentScoped.filter(item => !isWorkTodo(item));
 
     // ── Header
     const hdr = contentEl.createDiv({ cls: "ts-hdr" });
@@ -199,7 +221,7 @@ export class DashboardView extends ItemView {
     const pill = hdrL.createDiv({ cls: `ts-pill ${wsIndex ? "ts-pill--ok" : "ts-pill--warn"}` });
     pill.setText(wsIndex ? `${wsStats.length} workspaces` : "no .thirdspace");
     const refreshBtn = hdr.createDiv({ cls: "ts-hdr-right" }).createEl("button", { cls: "ts-icon-btn", text: "↻" });
-    refreshBtn.addEventListener("click", () => { this.snakeRouteCache = null; this.render(); });
+    refreshBtn.addEventListener("click", () => { this.snakeRouteCache = null; this.carryOverCache = null; this.render(); });
 
     // ── Stats row
     this.renderStatsRow(contentEl, vaultStats, activity.filter(a=>a.count>0).length);
@@ -240,6 +262,24 @@ export class DashboardView extends ItemView {
     const tdMeta = tdHd.createSpan({ cls: "ts-card-meta ts-todo-meta" });
     if (pending.length > 0) tdMeta.setText(`${pending.length} pending`);
     this.renderTodos(todoCard, todos);
+
+    // todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.2
+    if (carryOverTodos.length > 0) {
+      const carryCard = left.createDiv({ cls: "ts-card ts-carry-card" });
+      const carryHd = carryCard.createDiv({ cls: "ts-card-head" });
+      carryHd.createSpan({ cls: "ts-card-label", text: "昨日遗留" });
+      carryHd.createSpan({ cls: "ts-card-meta", text: `${carryOverTodos.length} unchecked` });
+      this.renderCarryOverTodos(carryCard, carryOverTodos);
+    }
+
+    // todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
+    if (overdueScoped.length > 0) {
+      const overdueCard = left.createDiv({ cls: "ts-card ts-overdue-card" });
+      const overdueHd = overdueCard.createDiv({ cls: "ts-card-head" });
+      overdueHd.createSpan({ cls: "ts-card-label", text: "逾期任务" });
+      overdueHd.createSpan({ cls: "ts-card-meta", text: `${overdueScoped.length} overdue` });
+      this.renderOverdueTodos(overdueCard, overdueScoped);
+    }
 
     // LEFT: work scoped tasks
     if (workScopedTodos.length > 0) {
@@ -320,8 +360,10 @@ export class DashboardView extends ItemView {
 
   // ── Todos (from today's worklog ## 今日Todo)
   private renderTodos(parent: HTMLElement, items: TodoItem[]) {
-    const pending = items.filter(t => !t.done);
-    const done    = items.filter(t => t.done);
+    // todo-overdue-and-edge-cases.URGENCY_SORT.1
+    const sorted = sortTodosByUrgency(items);
+    const pending = sorted.filter(t => !t.done);
+    const done    = sorted.filter(t => t.done);
 
     if (items.length === 0) {
       parent.createDiv({ cls: "ts-empty", text: 'No todos — click "记TODO" to add' });
@@ -350,7 +392,8 @@ export class DashboardView extends ItemView {
     const list = parent.createDiv({ cls: "ts-scoped-list" });
 
     for (const scope of order) {
-      const group = items.filter(item => item.scope === scope);
+      // todo-overdue-and-edge-cases.URGENCY_SORT.2
+      const group = sortTodosByUrgency(items.filter(item => item.scope === scope));
       if (group.length === 0) continue;
       const visibleKey = `${bucket}:${scope}`;
       const visibleCount = this.scopedVisibleCounts[visibleKey] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
@@ -404,12 +447,78 @@ export class DashboardView extends ItemView {
     if (item.dueDate) meta.createSpan({ text: `📅 ${item.dueDate}`, cls: "ts-scoped-date" });
   }
 
+  // ── Overdue scoped todos ─────────────────────────────────────
+  // todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
+  private renderOverdueTodos(parent: HTMLElement, items: ScopedTodoItem[]) {
+    const sorted = sortTodosByUrgency(items);
+    const list = parent.createDiv({ cls: "ts-scoped-list" });
+    const SHOW = 8;
+    for (const item of sorted.slice(0, SHOW)) {
+      const row = list.createDiv({ cls: "ts-scoped-row ts-scoped-row--overdue" });
+      row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
+      const info = row.createDiv({ cls: "ts-scoped-info" });
+      info.createDiv({ text: item.text, cls: "ts-scoped-text" });
+      this.renderScopedMeta(info, item);
+      const addBtn = row.createEl("button", { text: "加入今日", cls: "ts-scoped-add" });
+      addBtn.type = "button";
+      addBtn.addEventListener("click", async e => {
+        e.stopPropagation();
+        await addScopedTodoToToday(this.app, item);
+        await this.refreshTodoSection();
+        addBtn.setText("已加入");
+        addBtn.disabled = true;
+      });
+    }
+    if (sorted.length > SHOW) {
+      list.createDiv({ cls: "ts-todo-more", text: `+${sorted.length - SHOW} more` })
+        .addEventListener("click", () => this.openFile(getTaskPoolPath()));
+    }
+  }
+
+  // ── Carry-over todos from previous day ───────────────────────
+  // todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.3
+  private renderCarryOverTodos(parent: HTMLElement, items: TodoItem[]) {
+    const list = parent.createDiv({ cls: "ts-todo-list" });
+    const SHOW = 5;
+    for (const item of items.slice(0, SHOW)) {
+      const row = list.createDiv({ cls: "ts-todo-row ts-todo-carry" });
+      const chk = row.createEl("span", { cls: "ts-todo-chk", text: "☐" });
+      const body = row.createDiv({ cls: "ts-todo-body" });
+      body.createSpan({ cls: "ts-todo-txt", text: item.text });
+      this.renderScopedMeta(body, item);
+      const addBtn = row.createEl("button", { text: "加入今日", cls: "ts-scoped-add" });
+      addBtn.type = "button";
+      addBtn.addEventListener("click", async e => {
+        e.stopPropagation();
+        await addCarryOverTodoToToday(this.app, item);
+        await this.refreshTodoSection();
+        addBtn.setText("已加入");
+        addBtn.disabled = true;
+      });
+      chk.addEventListener("click", e => e.stopPropagation());
+    }
+    if (items.length > SHOW) {
+      list.createDiv({ cls: "ts-todo-more", text: `+${items.length - SHOW} more` });
+    }
+  }
+
   private renderTodoRow(parent: HTMLElement, item: TodoItem) {
-    const row = parent.createDiv({ cls: `ts-todo-row${item.done ? " ts-todo-done" : ""}` });
+    // todo-overdue-and-edge-cases.OVERDUE_DETECTION.3
+    const overdue = !item.done && isTodoOverdue(item);
+    const row = parent.createDiv({ cls: `ts-todo-row${item.done ? " ts-todo-done" : ""}${overdue ? " ts-todo-overdue" : ""}` });
     const chk = row.createEl("span", { cls: "ts-todo-chk", text: item.done ? "☑" : "☐" });
     const body = row.createDiv({ cls: "ts-todo-body" });
     const txt = body.createSpan({ cls: "ts-todo-txt", text: item.text });
+    if (overdue) body.createSpan({ cls: "ts-todo-overdue-badge", text: "逾期" });
     this.renderScopedMeta(body, item); // work-todo-board.TAG_DISPLAY.2
+
+    // todo-overdue-and-edge-cases.TODO_DELETE.1
+    const delBtn = row.createEl("span", { cls: "ts-todo-del", text: "✕" });
+    delBtn.addEventListener("click", async e => {
+      e.stopPropagation();
+      await deleteTodoFromWorklog(this.app, item);
+      await this.refreshTodoSection();
+    });
 
     // checkbox 单击 = 切换完成状态（原地更新，无全页刷新）
     chk.addEventListener("click", async e => {
@@ -442,6 +551,7 @@ export class DashboardView extends ItemView {
     // 双击行 = inline 编辑文字
     row.addEventListener("dblclick", e => {
       e.stopPropagation();
+      this.isEditingTodo = true;
       // 替换文字 span 为 input
       const input = document.createElement("input");
       input.type  = "text";
@@ -459,6 +569,13 @@ export class DashboardView extends ItemView {
       input.addEventListener("compositionend", () => { isEditingComposing = false; });
 
       let saved = false;
+      const finishEditing = () => {
+        this.isEditingTodo = false;
+        if (this.refreshPending) {
+          this.refreshPending = false;
+          this.render();
+        }
+      };
       const save = async () => {
         if (saved) return;
         saved = true;
@@ -470,6 +587,7 @@ export class DashboardView extends ItemView {
         // 原地把 input 换回 span，无全页刷新
         const span = createEl("span", { cls: "ts-todo-txt", text: item.text });
         input.replaceWith(span);
+        finishEditing();
       };
 
       input.addEventListener("keydown", async ev => {
@@ -479,6 +597,7 @@ export class DashboardView extends ItemView {
           // 取消：原地恢复原始 span
           const span = createEl("span", { cls: "ts-todo-txt", text: item.text });
           input.replaceWith(span);
+          finishEditing();
         }
       });
       input.addEventListener("blur", save);

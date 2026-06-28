@@ -178,3 +178,156 @@ test("toggleTodoInWorklog skips vault.modify when no todo matches", async () => 
 
   assert.equal(modifyCalls, 0);
 });
+
+// ── Overdue & edge case tests ────────────────────────────────
+
+test("todo-overdue-and-edge-cases.OVERDUE_DETECTION.1 isTodoOverdue detects past dueDate", async () => {
+  const { isTodoOverdue } = await loadVaultReader();
+
+  // Past dueDate → overdue
+  assert.equal(isTodoOverdue({ dueDate: "2020-01-01", done: false }), true);
+  // Future dueDate → not overdue
+  assert.equal(isTodoOverdue({ dueDate: "2099-12-31", done: false }), false);
+  // No dueDate → not overdue
+  assert.equal(isTodoOverdue({ done: false }), false);
+});
+
+test("todo-overdue-and-edge-cases.OVERDUE_DETECTION.2 isTodoOverdue detects past periodRange end date", async () => {
+  const { isTodoOverdue } = await loadVaultReader();
+
+  // Past periodRange → overdue
+  assert.equal(isTodoOverdue({ periodRange: "2020-01-01 到 2020-01-07", done: false }), true);
+  // Future periodRange → not overdue
+  assert.equal(isTodoOverdue({ periodRange: "2099-01-01 到 2099-01-07", done: false }), false);
+});
+
+test("todo-overdue-and-edge-cases.OVERDUE_DETECTION.5 completed todos are never overdue", async () => {
+  const { isTodoOverdue } = await loadVaultReader();
+
+  // Done with past dueDate → NOT overdue
+  assert.equal(isTodoOverdue({ dueDate: "2020-01-01", done: true }), false);
+  // Done with past periodRange → NOT overdue
+  assert.equal(isTodoOverdue({ periodRange: "2020-01-01 到 2020-01-07", done: true }), false);
+});
+
+test("todo-overdue-and-edge-cases.URGENCY_SORT.1 sortTodosByUrgency puts overdue first then by date", async () => {
+  const { sortTodosByUrgency } = await loadVaultReader();
+
+  const items = [
+    { text: "future", done: false, dueDate: "2099-12-31" },
+    { text: "undated", done: false },
+    { text: "past", done: false, dueDate: "2020-01-01" },
+    { text: "soon", done: false, dueDate: "2099-01-01" },
+  ];
+
+  const sorted = sortTodosByUrgency(items);
+  assert.equal(sorted[0].text, "past");
+  assert.equal(sorted[1].text, "soon");
+  assert.equal(sorted[2].text, "future");
+  assert.equal(sorted[3].text, "undated");
+});
+
+test("todo-overdue-and-edge-cases.OVERDUE_DETECTION.4 categorizeScopedOverdue splits overdue and current", async () => {
+  const { categorizeScopedOverdue } = await loadVaultReader();
+
+  const items = [
+    { text: "past", done: false, scope: "week", tags: [], periodRange: "2020-01-01 到 2020-01-07" },
+    { text: "future", done: false, scope: "week", tags: [], periodRange: "2099-01-01 到 2099-01-07" },
+    { text: "undated", done: false, scope: "longterm", tags: [] },
+  ];
+
+  const { overdue, current } = categorizeScopedOverdue(items);
+  assert.equal(overdue.length, 1);
+  assert.equal(overdue[0].text, "past");
+  assert.equal(current.length, 2);
+});
+
+test("todo-overdue-and-edge-cases.TODO_DELETE.1 deleteTodoFromWorklog removes matching line", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let writtenMd = null;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 任务A\n- [ ] 任务B\n- [ ] 任务C\n",
+      modify: async (_f, md) => { writtenMd = md; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "任务B", done: false, tags: [] });
+  assert.equal(writtenMd, "## 今日Todo\n- [ ] 任务A\n- [ ] 任务C\n");
+});
+
+test("deleteTodoFromWorklog uses taskId to delete the correct duplicate-text todo", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let writtenMd = null;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 相同任务 ^ts-aaa\n- [ ] 相同任务 ^ts-bbb\n",
+      modify: async (_f, md) => { writtenMd = md; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "相同任务", done: false, tags: [], taskId: "ts-bbb" });
+  assert.equal(writtenMd, "## 今日Todo\n- [ ] 相同任务 ^ts-aaa\n");
+});
+
+test("deleteTodoFromWorklog uses stricter matching when taskId is absent", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let writtenMd = null;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 任务A 📅 2026-06-30 #工作\n- [ ] 任务A 📅 2026-07-01 #工作\n",
+      modify: async (_f, md) => { writtenMd = md; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "任务A", done: false, tags: ["工作"], dueDate: "2026-07-01" });
+  assert.equal(writtenMd, "## 今日Todo\n- [ ] 任务A 📅 2026-06-30 #工作\n");
+});
+
+test("deleteTodoFromWorklog skips vault.modify when no todo matches", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let modifyCalls = 0;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 已存在任务\n",
+      modify: async () => { modifyCalls += 1; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "不存在任务", done: false, tags: [] });
+  assert.equal(modifyCalls, 0);
+});
+
+test("todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.1 loadCarryOverTodos finds unchecked from previous worklog", async () => {
+  const { loadCarryOverTodos } = await loadVaultReader();
+  const todayStr = new Date().toLocaleDateString("sv-SE").replace(/-/g, "");
+
+  const app = {
+    vault: {
+      getMarkdownFiles: () => [
+        { path: `02-日记/工作日志/${todayStr}_工作日志_周一.md`, basename: `${todayStr}_工作日志_周一` },
+        { path: "02-日记/工作日志/20260625_工作日志_周四.md", basename: "20260625_工作日志_周四" },
+      ],
+      read: async () => "## 今日Todo\n- [ ] 昨天没做完的事\n",
+    },
+  };
+
+  const result = await loadCarryOverTodos(app);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].text, "昨天没做完的事");
+});
+
+test("todo-overdue-and-edge-cases.STALE_PERIOD_RANGE.1 overdue detection uses stored end date not recomputed", async () => {
+  const { isTodoOverdue } = await loadVaultReader();
+
+  // A week-scoped todo created in a past week with a stale periodRange
+  // The end date "2020-01-07" is in the past → overdue
+  assert.equal(
+    isTodoOverdue({ periodRange: "2020-01-06 到 2020-01-12", done: false }),
+    true,
+  );
+});
