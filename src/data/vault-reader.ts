@@ -281,6 +281,60 @@ function parseTodoBody(body: string): Omit<TodoItem, "done"> {
   };
 }
 
+// ── Overdue detection ────────────────────────────────────────
+// todo-overdue-and-edge-cases.TIMEZONE.1
+function getTodayStr(): string { return localDateStr(new Date()); }
+
+/** Extract the end date from a "YYYY-MM-DD 到 YYYY-MM-DD" period range string. */
+export function parsePeriodEnd(periodRange: string): string | null {
+  const m = periodRange.match(/(\d{4}-\d{2}-\d{2})\s+到\s+(\d{4}-\d{2}-\d{2})/);
+  return m ? m[2] : null;
+}
+
+// todo-overdue-and-edge-cases.OVERDUE_DETECTION.1 todo-overdue-and-edge-cases.OVERDUE_DETECTION.2 todo-overdue-and-edge-cases.OVERDUE_DETECTION.5
+export function isTodoOverdue(item: { dueDate?: string; periodRange?: string; done?: boolean }): boolean {
+  if (item.done) return false;
+  const today = getTodayStr();
+  // Check dueDate
+  if (item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate) && item.dueDate < today) return true;
+  // Check periodRange end date
+  if (item.periodRange) {
+    const end = parsePeriodEnd(item.periodRange);
+    if (end && end < today) return true;
+  }
+  return false;
+}
+
+/** Split scoped todos into overdue and current (non-overdue) groups */
+// todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
+export function categorizeScopedOverdue(items: ScopedTodoItem[]): { overdue: ScopedTodoItem[]; current: ScopedTodoItem[] } {
+  const overdue: ScopedTodoItem[] = [];
+  const current: ScopedTodoItem[] = [];
+  for (const item of items) {
+    if (isTodoOverdue(item)) overdue.push(item);
+    else current.push(item);
+  }
+  return { overdue, current };
+}
+
+// ── Urgency sort ─────────────────────────────────────────────
+// todo-overdue-and-edge-cases.URGENCY_SORT.1 todo-overdue-and-edge-cases.URGENCY_SORT.2
+export function sortTodosByUrgency<T extends { done?: boolean; dueDate?: string; periodRange?: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    // Overdue first
+    const aOverdue = !a.done && isTodoOverdue(a);
+    const bOverdue = !b.done && isTodoOverdue(b);
+    if (aOverdue && !bOverdue) return -1;
+    if (!aOverdue && bOverdue) return 1;
+    // Then by dueDate ascending (undated last)
+    const aDate = a.dueDate ?? parsePeriodEnd(a.periodRange ?? "") ?? "9999-99-99";
+    const bDate = b.dueDate ?? parsePeriodEnd(b.periodRange ?? "") ?? "9999-99-99";
+    if (aDate < bDate) return -1;
+    if (aDate > bDate) return 1;
+    return 0;
+  });
+}
+
 export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): string | undefined {
   const d = new Date(baseDate);
   d.setHours(0, 0, 0, 0);
@@ -303,7 +357,7 @@ export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): stri
   return undefined;
 }
 
-function formatTodayTodoText(input: ScopedTodoInput | ScopedTodoItem): string {
+function formatTodayTodoText(input: { text: string; tags?: string[]; dueDate?: string; periodRange?: string; taskId?: string }): string {
   const tags = uniqueTags(input.tags);
   const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
   const dateText = isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
@@ -634,4 +688,49 @@ export function parseWorklogEntries(md: string): WorklogEntry[] {
     if (h3) entries.push({ time: h3[1], title: h3[2].trim() });
   }
   return entries.slice(0, 5);
+}
+
+// ── Cross-day carry-over ─────────────────────────────────────
+// todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.1 todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.4
+export async function loadCarryOverTodos(app: App): Promise<TodoItem[]> {
+  const todayStr = localDateStr(new Date());
+  // Find the most recent previous worklog that has unchecked todos
+  const candidates = app.vault.getMarkdownFiles()
+    .filter(f =>
+      f.path.startsWith("02-日记/工作日志/") &&
+      !f.path.includes(todayStr.replace(/-/g, "")) // exclude today's worklog
+    )
+    .sort((a, b) => b.basename.localeCompare(a.basename)); // most recent first
+
+  for (const f of candidates) {
+    try {
+      const md = await app.vault.read(f);
+      const todos = parseTodosFromMd(md);
+      const unchecked = todos.filter(t => !t.done);
+      if (unchecked.length > 0) return unchecked;
+    } catch { continue; }
+  }
+  return [];
+}
+
+// todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.4
+export async function addCarryOverTodoToToday(app: App, item: TodoItem): Promise<void> {
+  await addTodoToWorklog(app, formatTodayTodoText(item));
+}
+
+// todo-overdue-and-edge-cases.TODO_DELETE.1
+export async function deleteTodoFromWorklog(app: App, item: TodoItem): Promise<void> {
+  const path = getTodayWorklogPath();
+  const f = app.vault.getAbstractFileByPath(path) as TFile | null;
+  if (!f) return;
+  const md = await app.vault.read(f);
+  const lines = md.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^- \[( |x)\] (.+)/);
+    if (!m) continue;
+    if (parseTodoBody(m[2]).text !== item.text) continue;
+    lines.splice(i, 1);
+    break;
+  }
+  await app.vault.modify(f, lines.join("\n"));
 }

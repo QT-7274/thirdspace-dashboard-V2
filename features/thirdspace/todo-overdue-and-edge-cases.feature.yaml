@@ -1,0 +1,44 @@
+feature:
+  name: todo-overdue-and-edge-cases
+  product: thirdspace-dashboard
+  description: Ensure todos are correctly detected, sorted, and rendered when they become overdue, carry over across days, and support deletion and due-today visual cues.
+
+components:
+  OVERDUE_DETECTION:
+    requirements:
+      1: A todo with a dueDate earlier than today is detected as overdue.
+      2: A scoped todo whose periodRange end date is earlier than today is detected as overdue.
+      3: Today's todo rows that are overdue display an "逾期" badge and a distinct CSS class.
+      4: Scoped todos are split into overdue and current groups; overdue scoped todos render in a dedicated "逾期任务" card separate from current tasks.
+      5: Completed todos are never flagged as overdue regardless of their due date.
+
+  URGENCY_SORT:
+    requirements:
+      1: Today's pending todos are sorted with overdue items first, then by due date ascending, with undated items last.
+      2: Scoped todos within each scope section are sorted using the same urgency ordering.
+
+  CROSS_DAY_CARRYOVER:
+    requirements:
+      1: Unchecked todos from the most recent previous worklog are loaded as carry-over candidates.
+      2: When carry-over todos exist, a "昨日遗留" card is rendered showing them with an "加入今日" action.
+      3: Carry-over todo rows are visually distinct from today's todos.
+      4: Adding a carry-over todo to today copies it into today's worklog without modifying the source worklog.
+
+  TODO_DELETE:
+    requirements:
+      1: Each today's todo row has a delete (✕) button that removes the todo from the worklog file and refreshes the todo section.
+
+  DATE_VALIDATION:
+    requirements:
+      1: When creating a custom-scope todo, the selected date must not be earlier than today.
+
+constraints:
+  TIMEZONE:
+    description: All date comparisons use the system local timezone via localDateStr, never UTC or hardcoded offsets.
+    requirements:
+      1: Overdue detection, sorting, and carry-over logic all call localDateStr(new Date()) to obtain the current date string.
+
+  STALE_PERIOD_RANGE:
+    description: Scoped todo periodRange values are fixed at creation time and do not auto-update.
+    requirements:
+      1: A week or month scoped todo created in a past period retains its original periodRange; overdue detection uses the stored end date, not a recomputed current-period date.

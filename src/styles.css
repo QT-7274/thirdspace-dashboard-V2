@@ -349,6 +349,35 @@
 }
 .ts-todo-row:hover { background: var(--rust-lo); }
 .ts-todo-row.ts-todo-done { opacity: .45; }
+.ts-todo-row.ts-todo-overdue {
+  border-left: 2px solid var(--rust);
+  background: var(--rust-lo);
+}
+.ts-todo-overdue-badge {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--rust);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  flex-shrink: 0;
+  align-self: center;
+  white-space: nowrap;
+}
+.ts-todo-del {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-top: 1px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .1s;
+  padding: 0 2px;
+}
+.ts-todo-row:hover .ts-todo-del { opacity: .6; }
+.ts-todo-del:hover { color: var(--rust); opacity: 1 !important; }
 .ts-todo-chk {
   font-size: 13px;
   color: var(--muted);
@@ -418,6 +447,23 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
 }
 
 /* ── Scoped tasks ─────────────────────────────────────────── */
+.ts-overdue-card {
+  border-color: rgba(181,57,42,.35);
+  background: rgba(181,57,42,.04);
+}
+.ts-overdue-card .ts-card-label { color: var(--rust-2); }
+.ts-carry-card {
+  border-color: rgba(196,146,42,.25);
+}
+.ts-carry-card .ts-card-label { color: #C4922A; }
+.ts-todo-carry {
+  border-left: 2px solid #C4922A;
+  background: rgba(196,146,42,.06);
+}
+.ts-scoped-row--overdue {
+  border-left: 2px solid var(--rust);
+  background: var(--rust-lo);
+}
 .ts-work-card {
   border-color: rgba(181,57,42,.22);
 }
@@ -731,6 +777,10 @@ body.theme-dark .ts-prod-row  { background: var(--surface); }
 body.theme-dark .ts-act-btn   { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-stat-cell { background: var(--surface); }
 body.theme-dark .ts-scoped-section { background: var(--surface); }
+body.theme-dark .ts-overdue-card { background: rgba(224,90,74,.08); }
+body.theme-dark .ts-carry-card { background: var(--surface); }
+body.theme-dark .ts-todo-carry { background: rgba(196,146,42,.10); }
+body.theme-dark .ts-scoped-row--overdue { background: rgba(224,90,74,.10); }
 body.theme-dark .ts-modal-input { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-modal-date-input { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-chip { background: var(--surface); color: var(--ink-2); }
