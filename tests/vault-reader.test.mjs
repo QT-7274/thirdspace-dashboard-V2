@@ -253,8 +253,53 @@ test("todo-overdue-and-edge-cases.TODO_DELETE.1 deleteTodoFromWorklog removes ma
     },
   };
 
-  await deleteTodoFromWorklog(app, { text: "任务B", done: false });
+  await deleteTodoFromWorklog(app, { text: "任务B", done: false, tags: [] });
   assert.equal(writtenMd, "## 今日Todo\n- [ ] 任务A\n- [ ] 任务C\n");
+});
+
+test("deleteTodoFromWorklog uses taskId to delete the correct duplicate-text todo", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let writtenMd = null;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 相同任务 ^ts-aaa\n- [ ] 相同任务 ^ts-bbb\n",
+      modify: async (_f, md) => { writtenMd = md; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "相同任务", done: false, tags: [], taskId: "ts-bbb" });
+  assert.equal(writtenMd, "## 今日Todo\n- [ ] 相同任务 ^ts-aaa\n");
+});
+
+test("deleteTodoFromWorklog uses stricter matching when taskId is absent", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let writtenMd = null;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 任务A 📅 2026-06-30 #工作\n- [ ] 任务A 📅 2026-07-01 #工作\n",
+      modify: async (_f, md) => { writtenMd = md; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "任务A", done: false, tags: ["工作"], dueDate: "2026-07-01" });
+  assert.equal(writtenMd, "## 今日Todo\n- [ ] 任务A 📅 2026-06-30 #工作\n");
+});
+
+test("deleteTodoFromWorklog skips vault.modify when no todo matches", async () => {
+  const { deleteTodoFromWorklog } = await loadVaultReader();
+  let modifyCalls = 0;
+  const app = {
+    vault: {
+      getAbstractFileByPath: () => ({ path: "today.md" }),
+      read: async () => "## 今日Todo\n- [ ] 已存在任务\n",
+      modify: async () => { modifyCalls += 1; },
+    },
+  };
+
+  await deleteTodoFromWorklog(app, { text: "不存在任务", done: false, tags: [] });
+  assert.equal(modifyCalls, 0);
 });
 
 test("todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.1 loadCarryOverTodos finds unchecked from previous worklog", async () => {

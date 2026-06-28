@@ -281,6 +281,18 @@ function parseTodoBody(body: string): Omit<TodoItem, "done"> {
   };
 }
 
+/** Match a parsed todo line against a TodoItem for deletion. */
+function todoMatchesItem(parsed: Omit<TodoItem, "done">, item: TodoItem): boolean {
+  // Strongest identifier: taskId
+  if (item.taskId) return parsed.taskId === item.taskId;
+  // Fallback: strict multi-field equality
+  if (parsed.text !== item.text) return false;
+  if ((parsed.dueDate ?? "") !== (item.dueDate ?? "")) return false;
+  if ((parsed.periodRange ?? "") !== (item.periodRange ?? "")) return false;
+  if (parsed.tags.length !== item.tags.length) return false;
+  return parsed.tags.every(t => item.tags.includes(t));
+}
+
 // ── Overdue detection ────────────────────────────────────────
 // todo-overdue-and-edge-cases.TIMEZONE.1
 function getTodayStr(): string { return localDateStr(new Date()); }
@@ -700,7 +712,8 @@ export async function loadCarryOverTodos(app: App): Promise<TodoItem[]> {
       f.path.startsWith("02-日记/工作日志/") &&
       !f.path.includes(todayStr.replace(/-/g, "")) // exclude today's worklog
     )
-    .sort((a, b) => b.basename.localeCompare(a.basename)); // most recent first
+    .sort((a, b) => b.basename.localeCompare(a.basename)) // most recent first
+    .slice(0, 5); // cap worst-case reads
 
   for (const f of candidates) {
     try {
@@ -725,12 +738,14 @@ export async function deleteTodoFromWorklog(app: App, item: TodoItem): Promise<v
   if (!f) return;
   const md = await app.vault.read(f);
   const lines = md.split("\n");
+  let changed = false;
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
-    if (parseTodoBody(m[2]).text !== item.text) continue;
+    if (!todoMatchesItem(parseTodoBody(m[2]), item)) continue;
     lines.splice(i, 1);
+    changed = true;
     break;
   }
-  await app.vault.modify(f, lines.join("\n"));
+  if (changed) await app.vault.modify(f, lines.join("\n"));
 }

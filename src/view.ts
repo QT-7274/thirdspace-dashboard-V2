@@ -165,6 +165,7 @@ export class DashboardView extends ItemView {
   private scopedVisibleCounts: Record<string, number> = {};
   private isEditingTodo = false;
   private refreshPending = false;
+  private carryOverCache: { date: string; items: TodoItem[] } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -182,6 +183,14 @@ export class DashboardView extends ItemView {
     contentEl.empty();
     contentEl.addClass("ts-dash");
 
+    const todayStr = localDateStr(new Date());
+    const carryOverPromise = this.carryOverCache?.date === todayStr
+      ? Promise.resolve(this.carryOverCache.items)
+      : loadCarryOverTodos(this.app).then(items => {
+          this.carryOverCache = { date: todayStr, items };
+          return items;
+        });
+
     const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog, carryOverTodos] = await Promise.all([
       loadWorkspaceIndex(this.app),
       loadProductStatus(this.app),
@@ -189,7 +198,7 @@ export class DashboardView extends ItemView {
       loadTodos(this.app),
       loadScopedTodos(this.app),
       loadTodayWorklog(this.app),
-      loadCarryOverTodos(this.app),
+      carryOverPromise,
     ]);
 
     const wsDirs    = wsIndex?.map(e => e.dir) ?? [];
@@ -212,7 +221,7 @@ export class DashboardView extends ItemView {
     const pill = hdrL.createDiv({ cls: `ts-pill ${wsIndex ? "ts-pill--ok" : "ts-pill--warn"}` });
     pill.setText(wsIndex ? `${wsStats.length} workspaces` : "no .thirdspace");
     const refreshBtn = hdr.createDiv({ cls: "ts-hdr-right" }).createEl("button", { cls: "ts-icon-btn", text: "↻" });
-    refreshBtn.addEventListener("click", () => { this.snakeRouteCache = null; this.render(); });
+    refreshBtn.addEventListener("click", () => { this.snakeRouteCache = null; this.carryOverCache = null; this.render(); });
 
     // ── Stats row
     this.renderStatsRow(contentEl, vaultStats, activity.filter(a=>a.count>0).length);
