@@ -1,0 +1,19 @@
+feature:
+  name: acai-tracker-performance
+  product: thirdspace-dashboard
+  description: Acai 跟踪器不应阻塞仪表盘渲染，也不应在刷新时重复打热 Acai 服务。
+
+components:
+  DASHBOARD_RENDER:
+    requirements:
+      1: 仪表盘本地卡片渲染不等待 Acai 远端请求完成。
+      2: Acai 跟踪器在远端数据加载完成后可以独立更新自己的卡片。
+
+  REQUEST_REUSE:
+    requirements:
+      1: 仪表盘重复刷新时，Acai 跟踪器复用仍然新鲜的已拉取数据。
+      2: 并发的 Acai 跟踪器渲染共享正在进行的远端请求，而不是启动重复请求。
+
+  FAILURE_BACKOFF:
+    requirements:
+      1: Acai 拉取失败后，在短暂退避窗口结束前，仪表盘刷新跳过新的 Acai 远端请求。

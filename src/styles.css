@@ -792,8 +792,153 @@ body.theme-dark .ts-modal-btn   { background: var(--surface); color: var(--ink-2
   .ts-act-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
-
-@media (max-width: 520px) {
-  .ts-main { grid-template-columns: 1fr; }
-  .ts-act-grid { grid-template-columns: repeat(3, 1fr); }
+/* ── Acai Project Tracker ─────────────────────────────── */
+.ts-acai-card {
+  border-color: rgba(91,154,91,.22);
 }
+.ts-acai-card .ts-card-label {
+  color: #3d7a3d;
+}
+.ts-acai-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ts-acai-stat {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 800;
+  color: #3d7a3d;
+  line-height: 1;
+}
+.ts-acai-stat-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .3px;
+  margin-left: -4px;
+}
+.ts-acai-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.ts-acai-bar--mini {
+  height: 3px;
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+.ts-acai-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .5s ease;
+}
+.ts-acai-fill--high { background: #5B9A5B; }
+.ts-acai-fill--mid  { background: #C4922A; }
+.ts-acai-fill--low  { background: var(--rust); }
+.ts-acai-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ts-acai-impl-section {
+  margin-top: 8px;
+}
+.ts-acai-impl-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.ts-acai-impl-indicator {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: .3px;
+}
+.ts-acai-impl-indicator--high {
+  background: rgba(91,154,91,.12);
+  color: #3d7a3d;
+}
+.ts-acai-impl-indicator--mid {
+  background: rgba(196,146,42,.12);
+  color: #a07020;
+}
+.ts-acai-impl-indicator--low {
+  background: var(--rust-lo);
+  color: var(--rust);
+}
+.ts-acai-impl-pct {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.ts-acai-row {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cream);
+  border: 1px solid var(--border);
+}
+.ts-acai-info { min-width: 0; }
+.ts-acai-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-acai-desc {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-acai-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.ts-acai-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #3d7a3d;
+}
+.ts-acai-ref-badge {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 5px;
+}
+.ts-acai-ref-badge--has-test {
+  border-color: rgba(91,154,91,.35);
+  color: #3d7a3d;
+  background: rgba(91,154,91,.08);
+}
+
+body.theme-dark .ts-acai-card { border-color: rgba(91,154,91,.20); }
+body.theme-dark .ts-acai-card .ts-card-label { color: #6BAA6B; }
+body.theme-dark .ts-acai-stat { color: #6BAA6B; }
+body.theme-dark .ts-acai-fill--high { background: #5B9A5B; }
+body.theme-dark .ts-acai-fill--mid  { background: #C4922A; }
+body.theme-dark .ts-acai-fill--low  { background: var(--rust); }
+body.theme-dark .ts-acai-row { background: var(--surface); }
+body.theme-dark .ts-acai-count { color: #6BAA6B; }
+body.theme-dark .ts-acai-ref-badge { background: var(--surface); }
+body.theme-dark .ts-acai-ref-badge--has-test { background: rgba(91,154,91,.10); color: #6BAA6B; }
+body.theme-dark .ts-acai-impl-indicator--high { background: rgba(91,154,91,.15); color: #6BAA6B; }
+body.theme-dark .ts-acai-impl-indicator--mid  { background: rgba(196,146,42,.15); color: #C4922A; }
+body.theme-dark .ts-acai-impl-indicator--low  { background: rgba(224,90,74,.15); color: #E05A4A; }
+body.theme-dark .ts-acai-impl-pct { color: var(--ink-2); }
