@@ -35,13 +35,17 @@ export interface AcaiImplementationsData {
   implementations: AcaiImplementationEntry[];
 }
 
-export async function fetchImplementationFeatures(
-  baseUrl: string,
-  token: string,
-  productName: string,
-  implementationName: string
-): Promise<AcaiImplementationFeatures | null> {
-  const url = `${baseUrl}/api/v1/implementation-features?product_name=${encodeURIComponent(productName)}&implementation_name=${encodeURIComponent(implementationName)}`;
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err) {
+    const maybeStatus = "status" in err ? `status ${String((err as { status?: unknown }).status)}` : "";
+    const maybeMessage = "message" in err ? String((err as { message?: unknown }).message) : "";
+    return [maybeStatus, maybeMessage].filter(Boolean).join(" ");
+  }
+  return String(err);
+}
+
+async function requestAcaiData<T>(url: string, token: string, endpoint: string): Promise<T | null> {
   try {
     const result = await requestUrl({
       url,
@@ -51,11 +55,21 @@ export async function fetchImplementationFeatures(
         Accept: "application/json",
       },
     });
-    const data = result.json as { data: AcaiImplementationFeatures };
+    const data = result.json as { data?: T };
     return data?.data ?? null;
-  } catch {
-    return null;
+  } catch (err) {
+    throw new Error(`Acai ${endpoint} request failed: ${getErrorMessage(err)} (${url})`);
   }
+}
+
+export async function fetchImplementationFeatures(
+  baseUrl: string,
+  token: string,
+  productName: string,
+  implementationName: string
+): Promise<AcaiImplementationFeatures | null> {
+  const url = `${baseUrl}/api/v1/implementation-features?product_name=${encodeURIComponent(productName)}&implementation_name=${encodeURIComponent(implementationName)}`;
+  return requestAcaiData<AcaiImplementationFeatures>(url, token, "implementation-features");
 }
 
 export async function fetchImplementations(
@@ -64,18 +78,5 @@ export async function fetchImplementations(
   productName: string
 ): Promise<AcaiImplementationsData | null> {
   const url = `${baseUrl}/api/v1/implementations?product_name=${encodeURIComponent(productName)}`;
-  try {
-    const result = await requestUrl({
-      url,
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
-    const data = result.json as { data: AcaiImplementationsData };
-    return data?.data ?? null;
-  } catch {
-    return null;
-  }
+  return requestAcaiData<AcaiImplementationsData>(url, token, "implementations");
 }

@@ -196,8 +196,8 @@ export class DashboardView extends ItemView {
   private refreshPending = false;
   private carryOverCache: { date: string; items: TodoItem[] } | null = null;
   private acaiTrackerCache: AcaiTrackerState | null = null;
-  private acaiTrackerRequest: { key: string; promise: Promise<AcaiTrackerState> } | null = null;
-  private acaiTrackerBackoffUntil = 0;
+  private acaiTrackerRequestsByKey = new Map<string, Promise<AcaiTrackerState>>();
+  private acaiTrackerBackoffUntilByKey = new Map<string, number>();
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -705,10 +705,13 @@ export class DashboardView extends ItemView {
         trackerHost.empty();
         this.renderAcaiTrackerCards(trackerHost, state.data);
       })
-      .catch(() => {
+      .catch((err) => {
+        // acai-tracker-performance.FAILURE_DIAGNOSTICS.1
+        console.warn("[ThirdSpace] Acai tracker refresh failed", err);
         if (!trackerHost.isConnected) return;
         trackerHost.empty();
-        trackerHost.createDiv({ cls: "ts-card ts-acai-card ts-acai-error", text: "Acai unavailable" });
+        // acai-tracker-performance.FAILURE_DIAGNOSTICS.2
+        trackerHost.createDiv({ cls: "ts-card ts-acai-card ts-acai-error", text: this.getAcaiTrackerErrorMessage(err) });
       });
   }
 
@@ -729,54 +732,61 @@ export class DashboardView extends ItemView {
     if (cached) return cached;
 
     // acai-tracker-performance.FAILURE_BACKOFF.1
-    if (Date.now() < this.acaiTrackerBackoffUntil) {
+    const backoffUntil = this.acaiTrackerBackoffUntilByKey.get(key) ?? 0;
+    // acai-tracker-performance.FAILURE_BACKOFF.2
+    if (Date.now() < backoffUntil) {
       if (this.acaiTrackerCache?.key === key) return this.acaiTrackerCache;
       throw new Error("Acai tracker is in failure backoff");
     }
 
     // acai-tracker-performance.REQUEST_REUSE.2
-    if (this.acaiTrackerRequest?.key === key) return this.acaiTrackerRequest.promise;
+    const currentRequest = this.acaiTrackerRequestsByKey.get(key);
+    if (currentRequest) return currentRequest;
 
     const promise = this.fetchAcaiTrackerData(baseUrl, token, productNames, key)
       .then(state => {
         // acai-tracker-performance.REQUEST_REUSE.1
         this.acaiTrackerCache = state;
-        this.acaiTrackerBackoffUntil = 0;
+        this.acaiTrackerBackoffUntilByKey.delete(key);
         return state;
       })
       .catch(error => {
-        this.acaiTrackerBackoffUntil = Date.now() + ACAI_FAILURE_BACKOFF_MS;
+        this.acaiTrackerBackoffUntilByKey.set(key, Date.now() + ACAI_FAILURE_BACKOFF_MS);
         throw error;
       })
       .finally(() => {
-        this.acaiTrackerRequest = null;
+        this.acaiTrackerRequestsByKey.delete(key);
       });
 
-    this.acaiTrackerRequest = { key, promise };
+    this.acaiTrackerRequestsByKey.set(key, promise);
     return promise;
   }
 
+  private getAcaiTrackerErrorMessage(err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/401|403|auth|bearer|token/i.test(message)) return "Acai auth failed";
+    if (/failure backoff/i.test(message)) return "Acai retry paused";
+    return "Acai unavailable";
+  }
+
   private async fetchAcaiTrackerData(baseUrl: string, token: string, productNames: string[], key: string): Promise<AcaiTrackerState> {
-    let hasFetchFailure = false;
     const data = await Promise.all(
       productNames.map(async (product) => {
         const implsData = await fetchImplementations(baseUrl, token, product);
-        if (!implsData) hasFetchFailure = true;
+        if (!implsData) throw new Error(`Acai implementations returned no data for ${product}`);
         const implementations = implsData?.implementations ?? [];
         const implFeatures = await Promise.all(
           implementations.map(async (impl) => {
             const features = await fetchImplementationFeatures(
               baseUrl, token, product, impl.implementation_name
             );
-            if (!features) hasFetchFailure = true;
+            if (!features) throw new Error(`Acai implementation-features returned no data for ${product}/${impl.implementation_name}`);
             return { impl, features };
           })
         );
         return { product, implFeatures };
       })
     );
-
-    if (hasFetchFailure) throw new Error("Acai tracker fetch failed");
 
     return { key, fetchedAt: Date.now(), data };
   }

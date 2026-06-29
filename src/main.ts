@@ -107,15 +107,18 @@ class ThirdSpaceSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Acai API Token")
       .setDesc("Bearer token for the Acai API (team-scoped)")
-      .addText((text) =>
+      .addText((text) => {
+        // acai-tracker-performance.TOKEN_SECURITY.1
+        text.inputEl.type = "password";
+        text.inputEl.autocomplete = "off";
         text
           .setPlaceholder("at_xxxxx...")
           .setValue(this.plugin.settings.acaiApiToken)
           .onChange(async (value) => {
             this.plugin.settings.acaiApiToken = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+      });
 
     new Setting(containerEl)
       .setName("Products to Track")
