@@ -15,8 +15,37 @@ import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
 import { shouldSubmitOnEnter } from "./utils/keyboard";
 import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getNextVisibleCount, getRemainingCount } from "./utils/pagination";
+import {
+  fetchImplementationFeatures, fetchImplementations,
+  type AcaiFeatureEntry, type AcaiImplementationFeatures, type AcaiImplementationEntry,
+} from "./data/acai-client";
+import { parseProductNames } from "./main";
 
 export const VIEW_TYPE = "thirdspace-dashboard";
+
+const ACAI_CACHE_TTL_MS = 5 * 60_000;
+const ACAI_FAILURE_BACKOFF_MS = 2 * 60_000;
+
+type AcaiProductData = {
+  product: string;
+  implFeatures: Array<{
+    impl: AcaiImplementationEntry;
+    features: AcaiImplementationFeatures | null;
+  }>;
+};
+
+type AcaiTrackerState = {
+  key: string;
+  fetchedAt: number;
+  data: AcaiProductData[];
+};
+
+// ── Helpers ──────────────────────────────────────────────────
+function pctClass(pct: number): string {
+  if (pct >= 80) return "high";
+  if (pct >= 40) return "mid";
+  return "low";
+}
 
 // ── Todo Input Modal ──────────────────────────────────────────
 const TODO_SCOPE_OPTIONS: Array<{ scope: TaskScope; label: string }> = [
@@ -166,6 +195,9 @@ export class DashboardView extends ItemView {
   private isEditingTodo = false;
   private refreshPending = false;
   private carryOverCache: { date: string; items: TodoItem[] } | null = null;
+  private acaiTrackerCache: AcaiTrackerState | null = null;
+  private acaiTrackerRequestsByKey = new Map<string, Promise<AcaiTrackerState>>();
+  private acaiTrackerBackoffUntilByKey = new Map<string, number>();
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -281,15 +313,6 @@ export class DashboardView extends ItemView {
       this.renderOverdueTodos(overdueCard, overdueScoped);
     }
 
-    // LEFT: work scoped tasks
-    if (workScopedTodos.length > 0) {
-      const workCard = left.createDiv({ cls: "ts-card ts-scoped-card ts-work-card" });
-      const workHd = workCard.createDiv({ cls: "ts-card-head" });
-      workHd.createSpan({ cls: "ts-card-label", text: "WORK TODOS" });
-      workHd.createSpan({ cls: "ts-card-meta", text: `${workScopedTodos.length} work` });
-      this.renderScopedTodos(workCard, workScopedTodos, "work");
-    }
-
     // LEFT: scoped tasks
     if (upcomingScopedTodos.length > 0) {
       const scopedCard = left.createDiv({ cls: "ts-card ts-scoped-card" });
@@ -319,6 +342,18 @@ export class DashboardView extends ItemView {
       recCard.createDiv({ cls: "ts-card-label", text: "RECENT" });
       this.renderRecent(recCard, recent);
     }
+
+    // RIGHT: work scoped tasks
+    if (workScopedTodos.length > 0) {
+      const workCard = right.createDiv({ cls: "ts-card ts-scoped-card ts-work-card" });
+      const workHd = workCard.createDiv({ cls: "ts-card-head" });
+      workHd.createSpan({ cls: "ts-card-label", text: "WORK TODOS" });
+      workHd.createSpan({ cls: "ts-card-meta", text: `${workScopedTodos.length} work` });
+      this.renderScopedTodos(workCard, workScopedTodos, "work");
+    }
+
+    // RIGHT: Acai project tracker
+    this.renderAcaiTracker(right);
 
     // RIGHT: products
     if (products.length > 0) {
@@ -641,6 +676,183 @@ export class DashboardView extends ItemView {
       const info = row.createDiv({ cls: "ts-prod-info" });
       info.createDiv({ cls: "ts-prod-name", text: p.name });
       if (p.milestone) info.createDiv({ cls: "ts-prod-mile", text: p.milestone });
+    }
+  }
+
+  // ── Acai Project Tracker
+  // ── Acai Project Tracker (auto-discover implementations)
+  private renderAcaiTracker(parent: HTMLElement) {
+    const { acaiBaseUrl, acaiApiToken, acaiProducts } = this.plugin.settings;
+    if (!acaiApiToken || !acaiProducts) return;
+
+    const productNames = parseProductNames(acaiProducts);
+    if (productNames.length === 0) return;
+
+    const trackerHost = parent.createDiv({ cls: "ts-acai-host" });
+    const requestKey = this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames);
+    const cached = this.getFreshAcaiTrackerCache(requestKey);
+    if (cached) {
+      this.renderAcaiTrackerCards(trackerHost, cached.data);
+      return;
+    }
+
+    trackerHost.createDiv({ cls: "ts-card ts-acai-card ts-acai-loading", text: "Loading Acai..." });
+
+    // acai-tracker-performance.DASHBOARD_RENDER.1 acai-tracker-performance.DASHBOARD_RENDER.2
+    this.loadAcaiTrackerData(acaiBaseUrl, acaiApiToken, productNames)
+      .then(state => {
+        if (!trackerHost.isConnected || state.key !== this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames)) return;
+        trackerHost.empty();
+        this.renderAcaiTrackerCards(trackerHost, state.data);
+      })
+      .catch((err) => {
+        // acai-tracker-performance.FAILURE_DIAGNOSTICS.1
+        console.warn("[ThirdSpace] Acai tracker refresh failed", err);
+        if (!trackerHost.isConnected) return;
+        trackerHost.empty();
+        // acai-tracker-performance.FAILURE_DIAGNOSTICS.2
+        trackerHost.createDiv({ cls: "ts-card ts-acai-card ts-acai-error", text: this.getAcaiTrackerErrorMessage(err) });
+      });
+  }
+
+  private getAcaiTrackerKey(baseUrl: string, token: string, productNames: string[]) {
+    return JSON.stringify({ baseUrl, token, productNames });
+  }
+
+  private getFreshAcaiTrackerCache(key: string) {
+    if (!this.acaiTrackerCache || this.acaiTrackerCache.key !== key) return null;
+    return Date.now() - this.acaiTrackerCache.fetchedAt < ACAI_CACHE_TTL_MS
+      ? this.acaiTrackerCache
+      : null;
+  }
+
+  private async loadAcaiTrackerData(baseUrl: string, token: string, productNames: string[]) {
+    const key = this.getAcaiTrackerKey(baseUrl, token, productNames);
+    const cached = this.getFreshAcaiTrackerCache(key);
+    if (cached) return cached;
+
+    // acai-tracker-performance.FAILURE_BACKOFF.1
+    const backoffUntil = this.acaiTrackerBackoffUntilByKey.get(key) ?? 0;
+    // acai-tracker-performance.FAILURE_BACKOFF.2
+    if (Date.now() < backoffUntil) {
+      if (this.acaiTrackerCache?.key === key) return this.acaiTrackerCache;
+      throw new Error("Acai tracker is in failure backoff");
+    }
+
+    // acai-tracker-performance.REQUEST_REUSE.2
+    const currentRequest = this.acaiTrackerRequestsByKey.get(key);
+    if (currentRequest) return currentRequest;
+
+    const promise = this.fetchAcaiTrackerData(baseUrl, token, productNames, key)
+      .then(state => {
+        // acai-tracker-performance.REQUEST_REUSE.1
+        this.acaiTrackerCache = state;
+        this.acaiTrackerBackoffUntilByKey.delete(key);
+        return state;
+      })
+      .catch(error => {
+        this.acaiTrackerBackoffUntilByKey.set(key, Date.now() + ACAI_FAILURE_BACKOFF_MS);
+        throw error;
+      })
+      .finally(() => {
+        this.acaiTrackerRequestsByKey.delete(key);
+      });
+
+    this.acaiTrackerRequestsByKey.set(key, promise);
+    return promise;
+  }
+
+  private getAcaiTrackerErrorMessage(err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/401|403|auth|bearer|token/i.test(message)) return "Acai auth failed";
+    if (/failure backoff/i.test(message)) return "Acai retry paused";
+    return "Acai unavailable";
+  }
+
+  private async fetchAcaiTrackerData(baseUrl: string, token: string, productNames: string[], key: string): Promise<AcaiTrackerState> {
+    const data = await Promise.all(
+      productNames.map(async (product) => {
+        const implsData = await fetchImplementations(baseUrl, token, product);
+        if (!implsData) throw new Error(`Acai implementations returned no data for ${product}`);
+        const implementations = implsData?.implementations ?? [];
+        const implFeatures = await Promise.all(
+          implementations.map(async (impl) => {
+            const features = await fetchImplementationFeatures(
+              baseUrl, token, product, impl.implementation_name
+            );
+            if (!features) throw new Error(`Acai implementation-features returned no data for ${product}/${impl.implementation_name}`);
+            return { impl, features };
+          })
+        );
+        return { product, implFeatures };
+      })
+    );
+
+    return { key, fetchedAt: Date.now(), data };
+  }
+
+  private renderAcaiTrackerCards(parent: HTMLElement, productData: AcaiProductData[]) {
+    for (const { product, implFeatures } of productData) {
+      const validImpls = implFeatures.filter(({ features }) => features && features.features.length > 0);
+      if (validImpls.length === 0) continue;
+
+      const trackerCard = parent.createDiv({ cls: "ts-card ts-acai-card" });
+      const trackerHd = trackerCard.createDiv({ cls: "ts-card-head" });
+      trackerHd.createSpan({ cls: "ts-card-label", text: product.toUpperCase() });
+      trackerHd.createSpan({ cls: "ts-card-meta", text: `${validImpls.length} impl(s)` });
+
+      // Product-wide overall stats
+      const allFeatures = validImpls.flatMap(({ features }) => features!.features);
+      const totalAcids = allFeatures.reduce((s, f) => s + f.total_count, 0);
+      const completedAcids = allFeatures.reduce((s, f) => s + f.completed_count, 0);
+      const overallPct = totalAcids > 0 ? Math.round(completedAcids / totalAcids * 100) : 0;
+
+      const summaryRow = trackerCard.createDiv({ cls: "ts-acai-summary" });
+      summaryRow.createDiv({ cls: "ts-acai-stat", text: `${completedAcids}/${totalAcids}` });
+      summaryRow.createDiv({ cls: "ts-acai-stat-label", text: "ACIDs done" });
+      summaryRow.createDiv({ cls: "ts-acai-stat", text: `${overallPct}%` });
+      summaryRow.createDiv({ cls: "ts-acai-stat-label", text: "overall" });
+
+      const overallBar = trackerCard.createDiv({ cls: "ts-acai-bar" });
+      overallBar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(overallPct)}`, attr: { style: `width:${overallPct}%` } });
+
+      // Per-implementation sections
+      for (const { impl, features } of validImpls) {
+        const implSection = trackerCard.createDiv({ cls: "ts-acai-impl-section" });
+        const implHead = implSection.createDiv({ cls: "ts-acai-impl-head" });
+
+        // Implementation name with colored indicator
+        const implIndicator = implHead.createSpan({ cls: "ts-acai-impl-indicator" });
+        const implPct = features!.features.reduce((s, f) => s + f.total_count, 0) > 0
+          ? Math.round(features!.features.reduce((s, f) => s + f.completed_count, 0) / features!.features.reduce((s, f) => s + f.total_count, 0) * 100)
+          : 0;
+        implIndicator.setText(impl.implementation_name);
+        implIndicator.addClass(`ts-acai-impl-indicator--${pctClass(implPct)}`);
+
+        implHead.createSpan({ cls: "ts-acai-impl-pct", text: `${implPct}%` });
+
+        const featureList = implSection.createDiv({ cls: "ts-acai-list" });
+        for (const feat of features!.features) {
+          const pct = feat.total_count > 0 ? Math.round(feat.completed_count / feat.total_count * 100) : 0;
+          const row = featureList.createDiv({ cls: "ts-acai-row" });
+
+          const info = row.createDiv({ cls: "ts-acai-info" });
+          info.createDiv({ cls: "ts-acai-name", text: feat.feature_name });
+          if (feat.description) {
+            info.createDiv({ cls: "ts-acai-desc", text: feat.description.slice(0, 60) });
+          }
+
+          const meta = row.createDiv({ cls: "ts-acai-meta" });
+          meta.createSpan({ cls: "ts-acai-count", text: `${feat.completed_count}/${feat.total_count}` });
+          if (feat.refs_count > 0) {
+            const refBadge = meta.createSpan({ cls: "ts-acai-ref-badge", text: `${feat.refs_count} refs` });
+            if (feat.test_refs_count > 0) refBadge.addClass("ts-acai-ref-badge--has-test");
+          }
+
+          const bar = row.createDiv({ cls: "ts-acai-bar ts-acai-bar--mini" });
+          bar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(pct)}`, attr: { style: `width:${pct}%` } });
+        }
+      }
     }
   }
 
