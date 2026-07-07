@@ -430,12 +430,15 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   white-space: nowrap;
 }
 .ts-todo-more {
+  border: 0;
+  background: transparent;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--rust);
   padding: 4px 6px;
   cursor: pointer;
   border-radius: 3px;
+  text-align: left;
   transition: background .1s;
 }
 .ts-todo-more:hover { background: var(--rust-lo); }
@@ -464,11 +467,80 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   border-left: 2px solid var(--rust);
   background: var(--rust-lo);
 }
+.ts-scoped-section--overdue {
+  background: rgba(181,57,42,.06);
+  border-color: rgba(181,57,42,.36);
+}
+.ts-scoped-section--overdue .ts-scoped-section-title {
+  color: var(--rust-2);
+}
+.ts-scoped-section--overdue .ts-scoped-section-count {
+  background: var(--rust-lo);
+  color: var(--rust-2);
+  font-weight: 700;
+}
+/* work-todo-board.TAG_DISPLAY.1 */
 .ts-work-card {
-  border-color: rgba(181,57,42,.22);
+  --work: #2F6F73;
+  --work-2: #23575A;
+  --work-lo: rgba(47,111,115,.10);
+  --work-border: rgba(47,111,115,.34);
+  background: #F7FBFA;
+  border-color: var(--work-border);
+  border-left: 3px solid var(--work);
 }
 .ts-work-card .ts-card-label {
-  color: var(--rust);
+  color: var(--work);
+}
+.ts-work-card .ts-card-meta {
+  color: var(--work-2);
+  font-weight: 700;
+}
+.ts-work-card .ts-scoped-section {
+  background: var(--surface);
+  border-color: var(--work-border);
+}
+/* work-todo-board.TAG_DISPLAY.3 */
+.ts-work-card .ts-scoped-section--overdue {
+  background: rgba(181,57,42,.07);
+  border-color: rgba(181,57,42,.44);
+  box-shadow: inset 3px 0 0 var(--rust);
+}
+.ts-work-card .ts-scoped-section-title {
+  color: var(--work);
+}
+.ts-work-card .ts-scoped-section--overdue .ts-scoped-section-title {
+  color: var(--rust-2);
+}
+.ts-work-card .ts-scoped-section-count {
+  background: var(--work-lo);
+  border-radius: 999px;
+  color: var(--work);
+  font-weight: 700;
+  padding: 1px 6px;
+}
+.ts-work-card .ts-scoped-section--overdue .ts-scoped-section-count {
+  background: var(--rust-lo);
+  color: var(--rust-2);
+}
+.ts-work-card .ts-scoped-row:hover {
+  background: var(--work-lo);
+}
+.ts-work-card .ts-scoped-row--overdue:hover {
+  background: rgba(181,57,42,.11);
+}
+.ts-work-card .ts-todo-more {
+  color: var(--work);
+}
+.ts-work-card .ts-todo-more:hover {
+  background: var(--work-lo);
+}
+.ts-work-card .ts-scoped-add {
+  color: var(--work);
+}
+.ts-work-card .ts-scoped-add:hover {
+  background: var(--work-lo);
+  border-color: var(--work);
 }
 .ts-scoped-list { display: flex; flex-direction: column; gap: 8px; }
 .ts-scoped-section {
@@ -538,6 +610,11 @@ body.theme-dark .ts-todo-edit-input { background: var(--surface); color: var(--i
   background: var(--rust-lo);
   color: var(--rust);
   font-weight: 700;
+}
+.ts-work-card .ts-tag--work {
+  border-color: var(--work-border);
+  background: var(--work-lo);
+  color: var(--work);
 }
 .ts-scoped-date { line-height: 1.35; }
 .ts-scoped-add {
@@ -781,6 +858,18 @@ body.theme-dark .ts-overdue-card { background: rgba(224,90,74,.08); }
 body.theme-dark .ts-carry-card { background: var(--surface); }
 body.theme-dark .ts-todo-carry { background: rgba(196,146,42,.10); }
 body.theme-dark .ts-scoped-row--overdue { background: rgba(224,90,74,.10); }
+body.theme-dark .ts-scoped-section--overdue { background: rgba(224,90,74,.08); }
+body.theme-dark .ts-work-card {
+  --work: #6DB6B4;
+  --work-2: #93CBC9;
+  --work-lo: rgba(109,182,180,.14);
+  --work-border: rgba(109,182,180,.36);
+  background: #1F2826;
+}
+body.theme-dark .ts-work-card .ts-scoped-section--overdue {
+  background: rgba(224,90,74,.10);
+  border-color: rgba(224,90,74,.46);
+}
 body.theme-dark .ts-modal-input { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-modal-date-input { background: var(--surface); color: var(--ink); }
 body.theme-dark .ts-chip { background: var(--surface); color: var(--ink-2); }

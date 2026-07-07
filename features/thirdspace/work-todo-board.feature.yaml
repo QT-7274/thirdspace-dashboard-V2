@@ -9,11 +9,18 @@ components:
       1: Dashboard separates open scoped todos tagged with `#工作` into a dedicated work todo card.
       2: Work scoped todos do not also appear in the general upcoming tasks card.
       3: The dedicated work todo card keeps the same open-file and add-to-today behavior as general scoped tasks.
+      4: 带有 `#工作` 标签的逾期指定日期任务必须显示在 `WORK TODOS` 卡片内，而不是进入全局逾期任务卡片。
 
   TAG_DISPLAY:
     requirements:
       1: The `#工作` tag is visually more prominent than other todo tags when rendered on the dashboard.
       2: Today's todo rows render markdown tags as metadata chips instead of mixing them into the todo title.
+      3: `WORK TODOS` 卡片内的逾期分组必须在视觉上区别于其他工作任务分组。
+
+  PAGINATION:
+    requirements:
+      1: scoped todo 分组存在隐藏任务时，`+x more` 必须作为可点击控件继续展示下一批隐藏任务。
+      2: 指定日期任务使用相同分页展开行为，逾期日期不能阻止展开。
 
 constraints:
   COMPATIBILITY:

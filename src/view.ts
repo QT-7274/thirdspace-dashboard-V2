@@ -56,6 +56,12 @@ const TODO_SCOPE_OPTIONS: Array<{ scope: TaskScope; label: string }> = [
   { scope: "custom", label: "指定日期" },
 ];
 const TODO_TAG_OPTIONS = ["工作", "项目", "学习", "生活", "插件"];
+type ScopedTodoSectionKey = ScopedTodoItem["scope"] | "overdue";
+
+function getScopedTodoSectionKey(item: ScopedTodoItem): ScopedTodoSectionKey {
+  // work-todo-board.WORK_BOARD.4 work-todo-board.PAGINATION.2
+  return isTodoOverdue(item) ? "overdue" : item.scope;
+}
 
 class TodoModal extends Modal {
   private onSubmit: (input: ScopedTodoInput) => void;
@@ -242,8 +248,11 @@ export class DashboardView extends ItemView {
     const pending   = todos.filter(t => !t.done);
     // todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
     const { overdue: overdueScoped, current: currentScoped } = categorizeScopedOverdue(scopedTodos);
+    // work-todo-board.WORK_BOARD.4
+    const overdueWorkScoped = overdueScoped.filter(isWorkTodo);
+    const overdueUpcomingScoped = overdueScoped.filter(item => !isWorkTodo(item));
     // work-todo-board.WORK_BOARD.1 work-todo-board.WORK_BOARD.2
-    const workScopedTodos = currentScoped.filter(isWorkTodo);
+    const workScopedTodos = [...overdueWorkScoped, ...currentScoped.filter(isWorkTodo)];
     const upcomingScopedTodos = currentScoped.filter(item => !isWorkTodo(item));
 
     // ── Header
@@ -305,12 +314,12 @@ export class DashboardView extends ItemView {
     }
 
     // todo-overdue-and-edge-cases.OVERDUE_DETECTION.4
-    if (overdueScoped.length > 0) {
+    if (overdueUpcomingScoped.length > 0) {
       const overdueCard = left.createDiv({ cls: "ts-card ts-overdue-card" });
       const overdueHd = overdueCard.createDiv({ cls: "ts-card-head" });
       overdueHd.createSpan({ cls: "ts-card-label", text: "逾期任务" });
-      overdueHd.createSpan({ cls: "ts-card-meta", text: `${overdueScoped.length} overdue` });
-      this.renderOverdueTodos(overdueCard, overdueScoped);
+      overdueHd.createSpan({ cls: "ts-card-meta", text: `${overdueUpcomingScoped.length} overdue` });
+      this.renderOverdueTodos(overdueCard, overdueUpcomingScoped);
     }
 
     // LEFT: scoped tasks
@@ -417,31 +426,32 @@ export class DashboardView extends ItemView {
   }
 
   private renderScopedTodos(parent: HTMLElement, items: ScopedTodoItem[], bucket = "upcoming") {
-    const labels: Record<ScopedTodoItem["scope"], string> = {
+    const labels: Record<ScopedTodoSectionKey, string> = {
+      overdue: "逾期",
       week: "本周",
       month: "本月",
       longterm: "长期",
       custom: "指定日期",
     };
-    const order: Array<ScopedTodoItem["scope"]> = ["week", "month", "custom", "longterm"];
+    const order: ScopedTodoSectionKey[] = ["overdue", "week", "month", "custom", "longterm"];
     const list = parent.createDiv({ cls: "ts-scoped-list" });
-
-    for (const scope of order) {
-      // todo-overdue-and-edge-cases.URGENCY_SORT.2
-      const group = sortTodosByUrgency(items.filter(item => item.scope === scope));
+    for (const section of order) {
+      // todo-overdue-and-edge-cases.URGENCY_SORT.2 work-todo-board.WORK_BOARD.4
+      const group = sortTodosByUrgency(items.filter(item => getScopedTodoSectionKey(item) === section));
       if (group.length === 0) continue;
-      const visibleKey = `${bucket}:${scope}`;
+      const visibleKey = `${bucket}:${section}`;
       const visibleCount = this.scopedVisibleCounts[visibleKey] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
       const visibleItems = group.slice(0, visibleCount);
       const remaining = getRemainingCount(group.length, visibleItems.length);
+      const isOverdueSection = section === "overdue";
 
-      const sec = list.createDiv({ cls: "ts-scoped-section" });
+      const sec = list.createDiv({ cls: `ts-scoped-section${isOverdueSection ? " ts-scoped-section--overdue" : ""}` });
       const head = sec.createDiv({ cls: "ts-scoped-section-head" });
-      head.createSpan({ text: labels[scope], cls: "ts-scoped-section-title" });
+      head.createSpan({ text: labels[section], cls: "ts-scoped-section-title" });
       head.createSpan({ text: `${group.length}`, cls: "ts-scoped-section-count" });
 
       for (const item of visibleItems) {
-        const row = sec.createDiv({ cls: "ts-scoped-row" });
+        const row = sec.createDiv({ cls: `ts-scoped-row${isOverdueSection ? " ts-scoped-row--overdue" : ""}` });
         row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
 
         const info = row.createDiv({ cls: "ts-scoped-info" });
@@ -460,7 +470,9 @@ export class DashboardView extends ItemView {
       }
 
       if (remaining > 0) {
-        const more = sec.createDiv({ cls: "ts-todo-more", text: `+${remaining} more` });
+        // work-todo-board.PAGINATION.1 work-todo-board.PAGINATION.2
+        const more = sec.createEl("button", { cls: "ts-todo-more", text: `+${remaining} more` });
+        more.type = "button";
         more.addEventListener("click", e => {
           e.stopPropagation();
           this.scopedVisibleCounts[visibleKey] = getNextVisibleCount(visibleItems.length, group.length);
