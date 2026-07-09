@@ -1003,7 +1003,7 @@ export class DashboardView extends ItemView {
         const writeKey = `${getAcaiFeatureKey(context.product_name, context.implementation_name, context.feature_name)}::${acid.acid}`;
         if (this.acaiStatusWrites.has(writeKey)) return;
 
-        const previousValue = select.value;
+        const previousValue = (status ?? "");
         select.disabled = true;
         this.acaiStatusWrites.add(writeKey);
 
@@ -1029,6 +1029,9 @@ export class DashboardView extends ItemView {
         } catch (err) {
           console.warn("[ThirdSpace] Acai state update failed", err);
           select.value = previousValue;
+          select.removeClass(`ts-acai-status--${nextStatus ?? "unset"}`);
+          select.addClass(`ts-acai-status--${status ?? "unset"}`);
+          this.refreshAcaiTrackerSection();
         } finally {
           select.disabled = false;
           this.acaiStatusWrites.delete(writeKey);
@@ -1089,15 +1092,42 @@ export class DashboardView extends ItemView {
     }
   }
 
+  private resetAcaiTrackerUiCache() {
+    this.acaiTrackerCache = null;
+    this.acaiContextCache.clear();
+    this.acaiContextRequests.clear();
+    this.acaiExpandedKeys.clear();
+  }
+
   private refreshAcaiTrackerSection() {
-    const host = this.containerEl.querySelector(".ts-acai-host");
+    const host = this.containerEl.querySelector<HTMLElement>(".ts-acai-host");
     if (!host) return;
 
     const { acaiBaseUrl, acaiApiToken, acaiProducts } = this.plugin.settings;
-    if (!acaiApiToken || !acaiProducts || !this.acaiTrackerCache) return;
+    if (!this.acaiTrackerCache) return;
+
+    const productNames = parseProductNames(acaiProducts);
+    if (!acaiApiToken || productNames.length === 0) {
+      this.resetAcaiTrackerUiCache();
+      host.empty();
+      return;
+    }
+
+    const currentKey = this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames);
+    if (this.acaiTrackerCache.key !== currentKey) {
+      this.resetAcaiTrackerUiCache();
+      const parent = host.parentElement;
+      if (!parent) {
+        host.empty();
+        return;
+      }
+      host.remove();
+      this.renderAcaiTracker(parent);
+      return;
+    }
 
     host.empty();
-    this.renderAcaiTrackerCards(host as HTMLElement, this.acaiTrackerCache.data, acaiBaseUrl, acaiApiToken);
+    this.renderAcaiTrackerCards(host, this.acaiTrackerCache.data, acaiBaseUrl, acaiApiToken);
   }
 
   // ── Quick actions
