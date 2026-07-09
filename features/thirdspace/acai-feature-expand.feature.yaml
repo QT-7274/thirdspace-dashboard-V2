@@ -1,0 +1,22 @@
+feature:
+  name: acai-feature-expand
+  product: thirdspace-dashboard
+  description: Acai 跟踪器中的功能项可展开查看 ACID 明细，并可直接修改状态。
+
+components:
+  FEATURE_EXPAND:
+    requirements:
+      1: 点击功能项行可展开或折叠 ACID 列表。
+      2: 展开时懒加载 feature-context，不阻塞其他面板渲染。
+      3: 已展开的项在 Acai 区域刷新后保持展开状态。
+
+  ACID_STATUS_EDIT:
+    requirements:
+      1: 每个 ACID 提供状态下拉框，支持 assigned、blocked、incomplete、completed、rejected、accepted 与 unset。
+      2: 修改状态后调用 PATCH /feature-states 写回 Acai 服务。
+      3: 写回成功后刷新该实现的汇总进度，并更新面板中的完成计数与进度条。
+
+  CONTEXT_CACHE:
+    requirements:
+      1: feature-context 响应在 5 分钟 TTL 内复用，避免重复展开时重复请求。
+      2: 并发的同一 feature-context 请求共享进行中的 Promise。
