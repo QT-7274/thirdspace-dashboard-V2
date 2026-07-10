@@ -16,8 +16,10 @@ import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-hea
 import { shouldSubmitOnEnter } from "./utils/keyboard";
 import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getNextVisibleCount, getRemainingCount } from "./utils/pagination";
 import {
-  fetchImplementationFeatures, fetchImplementations,
+  fetchImplementationFeatures, fetchImplementations, fetchFeatureContext, patchFeatureStates,
+  ACAI_STATE_OPTIONS,
   type AcaiFeatureEntry, type AcaiImplementationFeatures, type AcaiImplementationEntry,
+  type AcaiFeatureContext, type AcaiStateStatus,
 } from "./data/acai-client";
 import { parseProductNames } from "./main";
 
@@ -25,6 +27,21 @@ export const VIEW_TYPE = "thirdspace-dashboard";
 
 const ACAI_CACHE_TTL_MS = 5 * 60_000;
 const ACAI_FAILURE_BACKOFF_MS = 2 * 60_000;
+const ACAI_CONTEXT_CACHE_TTL_MS = 5 * 60_000;
+
+type AcaiFeatureKey = {
+  product: string;
+  implementation: string;
+  feature: string;
+};
+
+function getAcaiFeatureKey(product: string, implementation: string, feature: string): string {
+  return `${product}::${implementation}::${feature}`;
+}
+
+function parseAcaiStateValue(value: string): AcaiStateStatus {
+  return value === "" ? null : value as AcaiStateStatus;
+}
 
 type AcaiProductData = {
   product: string;
@@ -204,6 +221,10 @@ export class DashboardView extends ItemView {
   private acaiTrackerCache: AcaiTrackerState | null = null;
   private acaiTrackerRequestsByKey = new Map<string, Promise<AcaiTrackerState>>();
   private acaiTrackerBackoffUntilByKey = new Map<string, number>();
+  private acaiExpandedKeys = new Set<string>();
+  private acaiContextCache = new Map<string, { data: AcaiFeatureContext; fetchedAt: number }>();
+  private acaiContextRequests = new Map<string, Promise<AcaiFeatureContext>>();
+  private acaiStatusWrites = new Set<string>();
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -704,7 +725,7 @@ export class DashboardView extends ItemView {
     const requestKey = this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames);
     const cached = this.getFreshAcaiTrackerCache(requestKey);
     if (cached) {
-      this.renderAcaiTrackerCards(trackerHost, cached.data);
+      this.renderAcaiTrackerCards(trackerHost, cached.data, acaiBaseUrl, acaiApiToken);
       return;
     }
 
@@ -715,7 +736,7 @@ export class DashboardView extends ItemView {
       .then(state => {
         if (!trackerHost.isConnected || state.key !== this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames)) return;
         trackerHost.empty();
-        this.renderAcaiTrackerCards(trackerHost, state.data);
+        this.renderAcaiTrackerCards(trackerHost, state.data, acaiBaseUrl, acaiApiToken);
       })
       .catch((err) => {
         // acai-tracker-performance.FAILURE_DIAGNOSTICS.1
@@ -803,7 +824,12 @@ export class DashboardView extends ItemView {
     return { key, fetchedAt: Date.now(), data };
   }
 
-  private renderAcaiTrackerCards(parent: HTMLElement, productData: AcaiProductData[]) {
+  private renderAcaiTrackerCards(
+    parent: HTMLElement,
+    productData: AcaiProductData[],
+    baseUrl: string,
+    token: string,
+  ) {
     for (const { product, implFeatures } of productData) {
       const validImpls = implFeatures.filter(({ features }) => features && features.features.length > 0);
       if (validImpls.length === 0) continue;
@@ -813,7 +839,6 @@ export class DashboardView extends ItemView {
       trackerHd.createSpan({ cls: "ts-card-label", text: product.toUpperCase() });
       trackerHd.createSpan({ cls: "ts-card-meta", text: `${validImpls.length} impl(s)` });
 
-      // Product-wide overall stats
       const allFeatures = validImpls.flatMap(({ features }) => features!.features);
       const totalAcids = allFeatures.reduce((s, f) => s + f.total_count, 0);
       const completedAcids = allFeatures.reduce((s, f) => s + f.completed_count, 0);
@@ -828,12 +853,10 @@ export class DashboardView extends ItemView {
       const overallBar = trackerCard.createDiv({ cls: "ts-acai-bar" });
       overallBar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(overallPct)}`, attr: { style: `width:${overallPct}%` } });
 
-      // Per-implementation sections
       for (const { impl, features } of validImpls) {
         const implSection = trackerCard.createDiv({ cls: "ts-acai-impl-section" });
         const implHead = implSection.createDiv({ cls: "ts-acai-impl-head" });
 
-        // Implementation name with colored indicator
         const implIndicator = implHead.createSpan({ cls: "ts-acai-impl-indicator" });
         const implPct = features!.features.reduce((s, f) => s + f.total_count, 0) > 0
           ? Math.round(features!.features.reduce((s, f) => s + f.completed_count, 0) / features!.features.reduce((s, f) => s + f.total_count, 0) * 100)
@@ -845,27 +868,266 @@ export class DashboardView extends ItemView {
 
         const featureList = implSection.createDiv({ cls: "ts-acai-list" });
         for (const feat of features!.features) {
-          const pct = feat.total_count > 0 ? Math.round(feat.completed_count / feat.total_count * 100) : 0;
-          const row = featureList.createDiv({ cls: "ts-acai-row" });
-
-          const info = row.createDiv({ cls: "ts-acai-info" });
-          info.createDiv({ cls: "ts-acai-name", text: feat.feature_name });
-          if (feat.description) {
-            info.createDiv({ cls: "ts-acai-desc", text: feat.description.slice(0, 60) });
-          }
-
-          const meta = row.createDiv({ cls: "ts-acai-meta" });
-          meta.createSpan({ cls: "ts-acai-count", text: `${feat.completed_count}/${feat.total_count}` });
-          if (feat.refs_count > 0) {
-            const refBadge = meta.createSpan({ cls: "ts-acai-ref-badge", text: `${feat.refs_count} refs` });
-            if (feat.test_refs_count > 0) refBadge.addClass("ts-acai-ref-badge--has-test");
-          }
-
-          const bar = row.createDiv({ cls: "ts-acai-bar ts-acai-bar--mini" });
-          bar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(pct)}`, attr: { style: `width:${pct}%` } });
+          this.renderAcaiFeatureRow(featureList, {
+            product,
+            implementation: impl.implementation_name,
+            feature: feat.feature_name,
+            entry: feat,
+            baseUrl,
+            token,
+          });
         }
       }
     }
+  }
+
+  private renderAcaiFeatureRow(
+    parent: HTMLElement,
+    ctx: {
+      product: string;
+      implementation: string;
+      feature: string;
+      entry: AcaiFeatureEntry;
+      baseUrl: string;
+      token: string;
+    },
+  ) {
+    const { product, implementation, feature, entry, baseUrl, token } = ctx;
+    const featureKey = getAcaiFeatureKey(product, implementation, feature);
+    const isExpanded = this.acaiExpandedKeys.has(featureKey);
+    const pct = entry.total_count > 0 ? Math.round(entry.completed_count / entry.total_count * 100) : 0;
+
+    const row = parent.createDiv({
+      cls: `ts-acai-row ts-acai-row--expandable${isExpanded ? " ts-acai-row--expanded" : ""}`,
+    });
+
+    const head = row.createDiv({ cls: "ts-acai-row-head" });
+    head.createSpan({ cls: "ts-acai-chevron", text: isExpanded ? "▾" : "▸" });
+
+    const info = head.createDiv({ cls: "ts-acai-info" });
+    info.createDiv({ cls: "ts-acai-name", text: feature });
+    if (entry.description) {
+      info.createDiv({ cls: "ts-acai-desc", text: entry.description.slice(0, 60) });
+    }
+
+    const meta = head.createDiv({ cls: "ts-acai-meta" });
+    meta.createSpan({ cls: "ts-acai-count", text: `${entry.completed_count}/${entry.total_count}` });
+    if (entry.refs_count > 0) {
+      const refBadge = meta.createSpan({ cls: "ts-acai-ref-badge", text: `${entry.refs_count} refs` });
+      if (entry.test_refs_count > 0) refBadge.addClass("ts-acai-ref-badge--has-test");
+    }
+
+    const bar = row.createDiv({ cls: "ts-acai-bar ts-acai-bar--mini" });
+    bar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(pct)}`, attr: { style: `width:${pct}%` } });
+
+    const acidHost = row.createDiv({ cls: "ts-acai-acids" });
+    if (isExpanded) {
+      this.renderAcaiAcidPanel(acidHost, { product, implementation, feature, baseUrl, token });
+    } else {
+      acidHost.addClass("is-hidden");
+    }
+
+    head.addEventListener("click", () => {
+      if (this.acaiExpandedKeys.has(featureKey)) {
+        this.acaiExpandedKeys.delete(featureKey);
+      } else {
+        this.acaiExpandedKeys.add(featureKey);
+      }
+      this.refreshAcaiTrackerSection();
+    });
+  }
+
+  private async renderAcaiAcidPanel(
+    host: HTMLElement,
+    ctx: AcaiFeatureKey & { baseUrl: string; token: string },
+  ) {
+    const { product, implementation, feature, baseUrl, token } = ctx;
+    const featureKey = getAcaiFeatureKey(product, implementation, feature);
+    host.removeClass("is-hidden");
+    host.empty();
+    host.createDiv({ cls: "ts-acai-acids-loading", text: "Loading ACIDs..." });
+
+    try {
+      const context = await this.loadAcaiFeatureContext(baseUrl, token, product, implementation, feature);
+      if (!host.isConnected || !this.acaiExpandedKeys.has(featureKey)) return;
+      host.empty();
+      this.renderAcaiAcidList(host, context, baseUrl, token);
+    } catch (err) {
+      console.warn("[ThirdSpace] Acai feature context failed", err);
+      if (!host.isConnected) return;
+      host.empty();
+      host.createDiv({ cls: "ts-acai-acids-error", text: "Failed to load ACIDs" });
+    }
+  }
+
+  private renderAcaiAcidList(
+    host: HTMLElement,
+    context: AcaiFeatureContext,
+    baseUrl: string,
+    token: string,
+  ) {
+    const acids = context.acids.filter(acid => !acid.deprecated);
+    if (acids.length === 0) {
+      host.createDiv({ cls: "ts-acai-acids-empty", text: "No ACIDs" });
+      return;
+    }
+
+    for (const acid of acids) {
+      const acidRow = host.createDiv({ cls: "ts-acai-acid-row" });
+      acidRow.createDiv({ cls: "ts-acai-acid-id", text: acid.acid });
+
+      const body = acidRow.createDiv({ cls: "ts-acai-acid-body" });
+      body.createDiv({ cls: "ts-acai-acid-req", text: acid.requirement });
+
+      const refs = acidRow.createDiv({ cls: "ts-acai-acid-refs" });
+      if (acid.refs_count > 0) {
+        refs.createSpan({ cls: "ts-acai-ref-badge", text: `${acid.refs_count} refs` });
+        if (acid.test_refs_count > 0) {
+          refs.createSpan({ cls: "ts-acai-ref-badge ts-acai-ref-badge--has-test", text: `${acid.test_refs_count} tests` });
+        }
+      }
+
+      const status = acid.state?.status ?? null;
+      const select = acidRow.createEl("select", { cls: `ts-acai-status ts-acai-status--${status ?? "unset"}` });
+      for (const option of ACAI_STATE_OPTIONS) {
+        const opt = select.createEl("option", { value: option.value, text: option.label });
+        if ((status ?? "") === option.value) opt.selected = true;
+      }
+
+      select.addEventListener("click", e => e.stopPropagation());
+      select.addEventListener("mousedown", e => e.stopPropagation());
+      select.addEventListener("change", async () => {
+        const nextStatus = parseAcaiStateValue(select.value);
+        if (nextStatus === status) return;
+
+        const writeKey = `${getAcaiFeatureKey(context.product_name, context.implementation_name, context.feature_name)}::${acid.acid}`;
+        if (this.acaiStatusWrites.has(writeKey)) return;
+
+        const previousValue = (status ?? "");
+        select.disabled = true;
+        this.acaiStatusWrites.add(writeKey);
+
+        try {
+          await patchFeatureStates(
+            baseUrl,
+            token,
+            context.product_name,
+            context.implementation_name,
+            context.feature_name,
+            { [acid.acid]: { status: nextStatus } },
+          );
+
+          acid.state = { ...acid.state, status: nextStatus };
+          this.acaiContextCache.set(
+            getAcaiFeatureKey(context.product_name, context.implementation_name, context.feature_name),
+            { data: context, fetchedAt: Date.now() },
+          );
+          await this.refreshAcaiFeatureSummary(baseUrl, token, context.product_name, context.implementation_name);
+          select.removeClass(`ts-acai-status--${status ?? "unset"}`);
+          select.addClass(`ts-acai-status--${nextStatus ?? "unset"}`);
+          this.refreshAcaiTrackerSection();
+        } catch (err) {
+          console.warn("[ThirdSpace] Acai state update failed", err);
+          select.value = previousValue;
+          select.removeClass(`ts-acai-status--${nextStatus ?? "unset"}`);
+          select.addClass(`ts-acai-status--${status ?? "unset"}`);
+          this.refreshAcaiTrackerSection();
+        } finally {
+          select.disabled = false;
+          this.acaiStatusWrites.delete(writeKey);
+        }
+      });
+    }
+  }
+
+  private getFreshAcaiContextCache(featureKey: string) {
+    const cached = this.acaiContextCache.get(featureKey);
+    if (!cached) return null;
+    return Date.now() - cached.fetchedAt < ACAI_CONTEXT_CACHE_TTL_MS ? cached.data : null;
+  }
+
+  private loadAcaiFeatureContext(
+    baseUrl: string,
+    token: string,
+    product: string,
+    implementation: string,
+    feature: string,
+  ): Promise<AcaiFeatureContext> {
+    const featureKey = getAcaiFeatureKey(product, implementation, feature);
+    const cached = this.getFreshAcaiContextCache(featureKey);
+    if (cached) return Promise.resolve(cached);
+
+    const inflight = this.acaiContextRequests.get(featureKey);
+    if (inflight) return inflight;
+
+    const promise = fetchFeatureContext(baseUrl, token, product, implementation, feature, true)
+      .then(data => {
+        if (!data) throw new Error(`Acai feature-context returned no data for ${product}/${implementation}/${feature}`);
+        this.acaiContextCache.set(featureKey, { data, fetchedAt: Date.now() });
+        return data;
+      })
+      .finally(() => {
+        this.acaiContextRequests.delete(featureKey);
+      });
+
+    this.acaiContextRequests.set(featureKey, promise);
+    return promise;
+  }
+
+  private async refreshAcaiFeatureSummary(
+    baseUrl: string,
+    token: string,
+    product: string,
+    implementation: string,
+  ) {
+    const features = await fetchImplementationFeatures(baseUrl, token, product, implementation);
+    if (!features || !this.acaiTrackerCache) return;
+
+    for (const productData of this.acaiTrackerCache.data) {
+      if (productData.product !== product) continue;
+      for (const implFeat of productData.implFeatures) {
+        if (implFeat.impl.implementation_name !== implementation) continue;
+        implFeat.features = features;
+      }
+    }
+  }
+
+  private resetAcaiTrackerUiCache() {
+    this.acaiTrackerCache = null;
+    this.acaiContextCache.clear();
+    this.acaiContextRequests.clear();
+    this.acaiExpandedKeys.clear();
+  }
+
+  private refreshAcaiTrackerSection() {
+    const host = this.containerEl.querySelector<HTMLElement>(".ts-acai-host");
+    if (!host) return;
+
+    const { acaiBaseUrl, acaiApiToken, acaiProducts } = this.plugin.settings;
+    if (!this.acaiTrackerCache) return;
+
+    const productNames = parseProductNames(acaiProducts);
+    if (!acaiApiToken || productNames.length === 0) {
+      this.resetAcaiTrackerUiCache();
+      host.empty();
+      return;
+    }
+
+    const currentKey = this.getAcaiTrackerKey(acaiBaseUrl, acaiApiToken, productNames);
+    if (this.acaiTrackerCache.key !== currentKey) {
+      this.resetAcaiTrackerUiCache();
+      const parent = host.parentElement;
+      if (!parent) {
+        host.empty();
+        return;
+      }
+      host.remove();
+      this.renderAcaiTracker(parent);
+      return;
+    }
+
+    host.empty();
+    this.renderAcaiTrackerCards(host, this.acaiTrackerCache.data, acaiBaseUrl, acaiApiToken);
   }
 
   // ── Quick actions
