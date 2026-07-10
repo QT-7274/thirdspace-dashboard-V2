@@ -8,8 +8,13 @@ import {
   loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog, isWorkTodo,
   isTodoOverdue, sortTodosByUrgency, categorizeScopedOverdue,
   loadCarryOverTodos, addCarryOverTodoToToday, deleteTodoFromWorklog,
+  loadProjectInspirations, addProjectInspiration, updateInspirationStatus,
+  renameProjectInspiration, deleteProjectInspiration, getProjectInspirationsPath,
+  groupInspirationsByProject, collectInspirationProjectOptions, cycleInspirationStatus,
+  INSPIRATION_STATUS_META, INSPIRATION_STATUS_ORDER,
   type WorkspaceStats, type TodoItem, type VaultStats, type TodayWorklog,
   type ScopedTodoInput, type ScopedTodoItem, type TaskScope,
+  type InspirationItem, type InspirationStatus,
 } from "./data/vault-reader";
 import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
@@ -208,6 +213,151 @@ class TodoModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+type InspirationModalInput = {
+  project: string;
+  text: string;
+  status: InspirationStatus;
+};
+
+class InspirationModal extends Modal {
+  private onSubmit: (input: InspirationModalInput) => void;
+  private projectOptions: string[];
+  private selectedProject = "";
+  private useCustomProject = false;
+  private selectedStatus: InspirationStatus = "idea";
+  private customProjectInput: HTMLInputElement | null = null;
+  private projectButtons = new Map<string, HTMLButtonElement>();
+  private errorEl: HTMLElement | null = null;
+  private isComposingText = false;
+
+  constructor(app: any, projectOptions: string[], onSubmit: (input: InspirationModalInput) => void) {
+    super(app);
+    this.projectOptions = projectOptions;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("ts-modal");
+    contentEl.createEl("h3", { text: "记灵感 · Capture Idea", cls: "ts-modal-title" });
+
+    contentEl.createDiv({ cls: "ts-modal-field-label", text: "项目 · Project" });
+    const projectRow = contentEl.createDiv({ cls: "ts-chip-row" });
+    for (const project of this.projectOptions) {
+      const btn = projectRow.createEl("button", { text: project, cls: "ts-chip" });
+      btn.type = "button";
+      this.projectButtons.set(project, btn);
+      btn.addEventListener("click", () => {
+        this.selectedProject = project;
+        this.useCustomProject = false;
+        this.renderProjectState();
+      });
+    }
+    const customBtn = projectRow.createEl("button", { text: "自定义", cls: "ts-chip" });
+    customBtn.type = "button";
+    customBtn.addEventListener("click", () => {
+      this.useCustomProject = true;
+      this.selectedProject = "";
+      this.renderProjectState();
+      this.customProjectInput?.focus();
+    });
+    this.projectButtons.set("__custom__", customBtn);
+
+    const customRow = contentEl.createDiv({ cls: "ts-modal-custom-row ts-modal-custom-row--hidden" });
+    customRow.createSpan({ text: "新项目名", cls: "ts-modal-field-label" });
+    this.customProjectInput = customRow.createEl("input", { type: "text", cls: "ts-modal-input" });
+    this.customProjectInput.placeholder = "输入项目名称";
+
+    contentEl.createDiv({ cls: "ts-modal-field-label", text: "状态 · Status" });
+    const statusRow = contentEl.createDiv({ cls: "ts-chip-row" });
+    const statusButtons = new Map<InspirationStatus, HTMLButtonElement>();
+    for (const status of INSPIRATION_STATUS_ORDER) {
+      const meta = INSPIRATION_STATUS_META[status];
+      const btn = statusRow.createEl("button", { text: `${meta.emoji} ${meta.label}`, cls: "ts-chip" });
+      btn.type = "button";
+      statusButtons.set(status, btn);
+      btn.addEventListener("click", () => {
+        this.selectedStatus = status;
+        this.renderStatusState(statusButtons);
+      });
+    }
+
+    const input = contentEl.createEl("textarea", { cls: "ts-modal-textarea" });
+    input.placeholder = "写下你的灵感…";
+    input.rows = 4;
+    input.focus();
+    input.addEventListener("compositionstart", () => { this.isComposingText = true; });
+    input.addEventListener("compositionend", () => { this.isComposingText = false; });
+
+    this.errorEl = contentEl.createDiv({ cls: "ts-modal-error" });
+
+    const submit = () => {
+      const text = input.value.trim();
+      const project = this.useCustomProject
+        ? (this.customProjectInput?.value.trim() ?? "")
+        : this.selectedProject.trim();
+      if (!project) {
+        this.setError("请选择或输入项目名");
+        (this.useCustomProject ? this.customProjectInput : null)?.focus();
+        return;
+      }
+      if (!text) {
+        this.setError("先写一点灵感内容");
+        input.focus();
+        return;
+      }
+      this.onSubmit({ project, text, status: this.selectedStatus });
+      this.close();
+    };
+
+    const row = contentEl.createDiv({ cls: "ts-modal-row" });
+    const btn = row.createEl("button", { text: "保存", cls: "ts-modal-btn ts-modal-btn--primary" });
+    btn.type = "button";
+    btn.addEventListener("click", submit);
+    const cancel = row.createEl("button", { text: "取消", cls: "ts-modal-btn" });
+    cancel.type = "button";
+    cancel.addEventListener("click", () => this.close());
+
+    input.addEventListener("keydown", ev => {
+      if (shouldSubmitOnEnter(ev, this.isComposingText)) {
+        ev.preventDefault();
+        submit();
+      }
+    });
+
+    this.renderProjectState();
+    this.renderStatusState(statusButtons);
+  }
+
+  private renderProjectState() {
+    for (const [project, btn] of this.projectButtons) {
+      const active = project === "__custom__"
+        ? this.useCustomProject
+        : !this.useCustomProject && this.selectedProject === project;
+      if (active) btn.addClass("ts-chip--active");
+      else btn.removeClass("ts-chip--active");
+    }
+    this.customProjectInput?.parentElement?.classList.toggle(
+      "ts-modal-custom-row--hidden",
+      !this.useCustomProject,
+    );
+    this.setError("");
+  }
+
+  private renderStatusState(statusButtons: Map<InspirationStatus, HTMLButtonElement>) {
+    for (const [status, btn] of statusButtons) {
+      if (status === this.selectedStatus) btn.addClass("ts-chip--active");
+      else btn.removeClass("ts-chip--active");
+    }
+  }
+
+  private setError(message: string) {
+    if (this.errorEl) this.errorEl.setText(message);
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
 // ── Dashboard View ────────────────────────────────────────────
 export class DashboardView extends ItemView {
   plugin: ThirdSpaceDashboard;
@@ -225,6 +375,10 @@ export class DashboardView extends ItemView {
   private acaiContextCache = new Map<string, { data: AcaiFeatureContext; fetchedAt: number }>();
   private acaiContextRequests = new Map<string, Promise<AcaiFeatureContext>>();
   private acaiStatusWrites = new Set<string>();
+  private inspirationExpandedProjects = new Set<string>();
+  private showDiscardedInspirations = false;
+  private isEditingInspiration = false;
+  private inspirationProjectOptions: string[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: ThirdSpaceDashboard) {
     super(leaf); this.plugin = plugin;
@@ -234,7 +388,7 @@ export class DashboardView extends ItemView {
   getDisplayText() { return "ThirdSpace"; }
   getIcon()        { return "layout-dashboard"; }
 
-  async onOpen()  { this.containerEl.addClass("ts-root"); await this.render(); this.timer = window.setInterval(() => { if (this.isEditingTodo) { this.refreshPending = true; return; } this.render(); }, 60_000); }
+  async onOpen()  { this.containerEl.addClass("ts-root"); await this.render(); this.timer = window.setInterval(() => { if (this.isEditingTodo || this.isEditingInspiration) { this.refreshPending = true; return; } this.render(); }, 60_000); }
   onClose()       { if (this.timer) { clearInterval(this.timer); this.timer = null; } if (this.snakeReplayTimer) { clearTimeout(this.snakeReplayTimer); this.snakeReplayTimer = null; } return Promise.resolve(); }
 
   async render() {
@@ -250,7 +404,7 @@ export class DashboardView extends ItemView {
           return items;
         });
 
-    const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog, carryOverTodos] = await Promise.all([
+    const [wsIndex, productMd, activity, todos, scopedTodos, todayWorklog, carryOverTodos, inspirations] = await Promise.all([
       loadWorkspaceIndex(this.app),
       loadProductStatus(this.app),
       getDailyActivity(this.app, 365),
@@ -258,6 +412,7 @@ export class DashboardView extends ItemView {
       loadScopedTodos(this.app),
       loadTodayWorklog(this.app),
       carryOverPromise,
+      loadProjectInspirations(this.app),
     ]);
 
     const wsDirs    = wsIndex?.map(e => e.dir) ?? [];
@@ -365,6 +520,9 @@ export class DashboardView extends ItemView {
     const actCard = right.createDiv({ cls: "ts-card ts-quick-card" });
     actCard.createDiv({ cls: "ts-card-label", text: "QUICK" });
     this.renderActions(actCard);
+
+    // RIGHT: project inspirations
+    this.renderInspirations(right, inspirations, products);
 
     // RIGHT: recent
     if (recent.length > 0) {
@@ -697,6 +855,183 @@ export class DashboardView extends ItemView {
         row.createSpan({ cls: "ts-log-tl-title", text: e.title });
       }
     }
+  }
+
+  // ── Project Inspirations
+  private renderInspirations(
+    parent: HTMLElement,
+    inspirations: InspirationItem[],
+    products: ReturnType<typeof parseProducts>,
+  ) {
+    const acaiProducts = parseProductNames(this.plugin.settings.acaiProducts);
+    this.inspirationProjectOptions = collectInspirationProjectOptions(
+      products,
+      acaiProducts,
+      inspirations,
+    );
+
+    const visible = inspirations.filter(
+      item => this.showDiscardedInspirations || item.status !== "discarded",
+    );
+    const discardedCount = inspirations.filter(item => item.status === "discarded").length;
+    const groups = groupInspirationsByProject(visible).filter(group => group.items.length > 0);
+
+    const card = parent.createDiv({ cls: "ts-card ts-insp-card" });
+    const head = card.createDiv({ cls: "ts-card-head" });
+    head.createSpan({ cls: "ts-card-label", text: "项目灵感 · INSPIRATIONS" });
+    const addBtn = head.createEl("button", { cls: "ts-insp-add", text: "+ 记灵感" });
+    addBtn.type = "button";
+    addBtn.addEventListener("click", () => {
+      new InspirationModal(this.app, this.inspirationProjectOptions, async input => {
+        await addProjectInspiration(this.app, input.project, input.text, input.status);
+        this.inspirationExpandedProjects.add(input.project);
+        await this.refreshInspirationSection();
+      }).open();
+    });
+
+    if (groups.length === 0) {
+      card.createDiv({ cls: "ts-insp-empty", text: "还没有灵感，点右上角速记一条" });
+    } else {
+      const list = card.createDiv({ cls: "ts-insp-list" });
+      for (const group of groups) {
+        this.renderInspirationProjectGroup(list, group);
+      }
+    }
+
+    if (discardedCount > 0) {
+      const toggle = card.createEl("button", {
+        cls: "ts-insp-discarded-toggle",
+        text: this.showDiscardedInspirations
+          ? `隐藏已放弃 (${discardedCount})`
+          : `显示已放弃 (${discardedCount})`,
+      });
+      toggle.type = "button";
+      toggle.addEventListener("click", async () => {
+        this.showDiscardedInspirations = !this.showDiscardedInspirations;
+        await this.refreshInspirationSection();
+      });
+    }
+  }
+
+  private renderInspirationProjectGroup(
+    parent: HTMLElement,
+    group: { project: string; items: InspirationItem[] },
+  ) {
+    const isExpanded = this.inspirationExpandedProjects.has(group.project);
+    const section = parent.createDiv({ cls: "ts-insp-project" });
+
+    const head = section.createDiv({ cls: "ts-insp-project-head" });
+    head.createSpan({ cls: "ts-insp-chevron", text: isExpanded ? "▾" : "▸" });
+    head.createSpan({ cls: "ts-insp-project-name", text: group.project });
+    head.createSpan({ cls: "ts-insp-project-meta", text: `${group.items.length} 条` });
+    head.addEventListener("click", async () => {
+      if (isExpanded) this.inspirationExpandedProjects.delete(group.project);
+      else this.inspirationExpandedProjects.add(group.project);
+      await this.refreshInspirationSection();
+    });
+
+    if (!isExpanded) return;
+
+    const list = section.createDiv({ cls: "ts-insp-items" });
+    for (const item of group.items) {
+      this.renderInspirationRow(list, item);
+    }
+  }
+
+  private renderInspirationRow(parent: HTMLElement, item: InspirationItem) {
+    const meta = INSPIRATION_STATUS_META[item.status];
+    const row = parent.createDiv({ cls: `ts-insp-row ts-insp-row--${item.status}` });
+
+    const statusBtn = row.createEl("button", {
+      cls: `ts-insp-status ts-insp-status--${item.status}`,
+      text: meta.emoji,
+    });
+    statusBtn.type = "button";
+    statusBtn.setAttr("title", meta.label);
+    statusBtn.addEventListener("click", async e => {
+      e.stopPropagation();
+      const nextStatus = cycleInspirationStatus(item.status);
+      await updateInspirationStatus(this.app, item, nextStatus);
+      await this.refreshInspirationSection();
+    });
+
+    const body = row.createDiv({ cls: "ts-insp-body" });
+    const time = body.createSpan({ cls: "ts-insp-time", text: item.timestamp.slice(5) });
+    const txt = body.createSpan({ cls: "ts-insp-text", text: item.text });
+
+    const delBtn = row.createEl("button", { cls: "ts-insp-del", text: "✕" });
+    delBtn.type = "button";
+    delBtn.addEventListener("click", async e => {
+      e.stopPropagation();
+      if (!confirm("删除这条灵感？")) return;
+      await deleteProjectInspiration(this.app, item);
+      await this.refreshInspirationSection();
+    });
+
+    row.addEventListener("click", e => {
+      if ((e as MouseEvent).detail >= 2) return;
+      this.openFile(getProjectInspirationsPath());
+    });
+
+    row.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      this.isEditingInspiration = true;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = item.text;
+      input.className = "ts-insp-edit-input";
+      txt.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let isEditingComposing = false;
+      input.addEventListener("click", ev => ev.stopPropagation());
+      input.addEventListener("mousedown", ev => ev.stopPropagation());
+      input.addEventListener("compositionstart", () => { isEditingComposing = true; });
+      input.addEventListener("compositionend", () => { isEditingComposing = false; });
+
+      const save = async () => {
+        const newText = input.value.trim();
+        this.isEditingInspiration = false;
+        if (!newText || newText === item.text) {
+          await this.refreshInspirationSection();
+          return;
+        }
+        await renameProjectInspiration(this.app, item, newText);
+        await this.refreshInspirationSection();
+      };
+
+      input.addEventListener("keydown", async ev => {
+        if (shouldSubmitOnEnter(ev, isEditingComposing)) {
+          ev.preventDefault();
+          await save();
+        } else if (ev.key === "Escape") {
+          ev.preventDefault();
+          this.isEditingInspiration = false;
+          await this.refreshInspirationSection();
+        }
+      });
+      input.addEventListener("blur", () => { void save(); });
+    });
+  }
+
+  private async refreshInspirationSection() {
+    const card = this.containerEl.querySelector<HTMLElement>(".ts-insp-card");
+    if (!card?.parentElement) {
+      await this.render();
+      return;
+    }
+
+    const [inspirations, productMd] = await Promise.all([
+      loadProjectInspirations(this.app),
+      loadProductStatus(this.app),
+    ]);
+    const products = productMd ? parseProducts(productMd) : [];
+    const placeholder = document.createElement("div");
+    this.renderInspirations(placeholder, inspirations, products);
+    const newCard = placeholder.querySelector(".ts-insp-card");
+    if (newCard) card.replaceWith(newCard);
+    else await this.render();
   }
 
   // ── Products

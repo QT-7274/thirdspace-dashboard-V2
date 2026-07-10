@@ -1,0 +1,33 @@
+feature:
+  name: project-inspirations
+  product: thirdspace-dashboard
+  description: 仪表盘提供项目灵感面板，支持速记、按项目折叠查看、状态流转与编辑。
+
+components:
+  PANEL_RENDER:
+    requirements:
+      1: 右栏 QUICK 下方展示「项目灵感 · INSPIRATIONS」卡片。
+      2: 按项目分组展示灵感，项目头可展开或折叠。
+      3: 已放弃状态默认隐藏，并提供显示/隐藏切换。
+
+  QUICK_CAPTURE:
+    requirements:
+      1: 卡片右上角提供「+ 记灵感」入口，打开弹框速记。
+      2: 项目选择合并 PRODUCTS、Acai Products、已有灵感项目，并支持自定义项目名。
+      3: 新建灵感默认写入 04-项目/project-inspirations.md。
+
+  INSPIRATION_FIELDS:
+    requirements:
+      1: 每条灵感包含自动时间戳、正文与状态。
+      2: 状态支持新想法、探索中、已采纳、已放弃四种。
+
+  INLINE_EDIT:
+    requirements:
+      1: 点击状态图标循环切换状态并写回文件。
+      2: 双击行内编辑正文。
+      3: 悬停可删除灵感，删除前需确认。
+
+  PROJECT_OPTIONS:
+    requirements:
+      1: 项目候选来自 product-status、Acai 设置与灵感文件中已有项目。
+      2: 弹框允许输入自定义新项目名。
