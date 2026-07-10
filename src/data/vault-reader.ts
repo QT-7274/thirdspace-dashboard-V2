@@ -775,19 +775,52 @@ export interface InspirationItem {
   status: InspirationStatus;
   timestamp: string;
   text: string;
+  inspirationId?: string;
 }
 
 const INSPIRATION_LINE_RE = /^- \[(💡|🔍|✅|🗑️)\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.+)$/;
+
+function createInspirationId(): string {
+  return `pi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseInspirationId(body: string): string | undefined {
+  return body.match(/(?:^|\s)\^(pi-[A-Za-z0-9_-]+)/)?.[1];
+}
+
+function parseInspirationBody(body: string): { text: string; inspirationId?: string } {
+  const inspirationId = parseInspirationId(body);
+  const text = body.replace(/(?:^|\s)\^pi-[A-Za-z0-9_-]+/g, " ").trim();
+  return inspirationId ? { text, inspirationId } : { text };
+}
+
+export function parseInspirationLine(line: string, project = ""): InspirationItem | null {
+  const match = line.match(INSPIRATION_LINE_RE);
+  if (!match) return null;
+
+  const status = INSPIRATION_EMOJI_TO_STATUS[match[1]];
+  if (!status) return null;
+
+  const body = parseInspirationBody(match[3]);
+  return {
+    project,
+    status,
+    timestamp: match[2],
+    text: body.text,
+    ...(body.inspirationId ? { inspirationId: body.inspirationId } : {}),
+  };
+}
 
 export function formatInspirationTimestamp(d = new Date()): string {
   return localTimestamp(d).slice(0, 16);
 }
 
 export function formatInspirationLine(
-  item: Pick<InspirationItem, "status" | "timestamp" | "text">,
+  item: Pick<InspirationItem, "status" | "timestamp" | "text"> & { inspirationId?: string },
 ): string {
   const emoji = INSPIRATION_STATUS_META[item.status].emoji;
-  return `- [${emoji}] ${item.timestamp} · ${item.text}`;
+  const idSuffix = item.inspirationId ? ` ^${item.inspirationId}` : "";
+  return `- [${emoji}] ${item.timestamp} · ${item.text}${idSuffix}`;
 }
 
 export function parseInspirationsFromMd(md: string): InspirationItem[] {
@@ -801,18 +834,9 @@ export function parseInspirationsFromMd(md: string): InspirationItem[] {
     }
     if (!currentProject) continue;
 
-    const match = line.match(INSPIRATION_LINE_RE);
-    if (!match) continue;
-
-    const status = INSPIRATION_EMOJI_TO_STATUS[match[1]];
-    if (!status) continue;
-
-    items.push({
-      project: currentProject,
-      status,
-      timestamp: match[2],
-      text: match[3].trim(),
-    });
+    const parsed = parseInspirationLine(line, currentProject);
+    if (!parsed) continue;
+    items.push(parsed);
   }
 
   return items;
@@ -862,10 +886,34 @@ export function cycleInspirationStatus(status: InspirationStatus): InspirationSt
 }
 
 export function inspirationMatchesItem(a: InspirationItem, b: InspirationItem): boolean {
+  if (a.inspirationId && b.inspirationId) return a.inspirationId === b.inspirationId;
   return a.project === b.project
     && a.timestamp === b.timestamp
     && a.text === b.text
     && a.status === b.status;
+}
+
+function findInspirationLineIndex(lines: string[], item: InspirationItem): number {
+  const range = findProjectSectionRange(lines, item.project);
+  if (!range) return -1;
+
+  for (let i = range.start + 1; i < range.end; i++) {
+    const parsed = parseInspirationLine(lines[i], item.project);
+    if (!parsed) continue;
+    if (inspirationMatchesItem(parsed, item)) return i;
+  }
+  return -1;
+}
+
+function replaceInspirationLine(
+  lines: string[],
+  item: InspirationItem,
+  nextLine: string,
+): boolean {
+  const index = findInspirationLineIndex(lines, item);
+  if (index < 0) return false;
+  lines[index] = nextLine;
+  return true;
 }
 
 function findProjectSectionRange(lines: string[], project: string): { start: number; end: number } | null {
@@ -889,24 +937,6 @@ function findProjectSectionRange(lines: string[], project: string): { start: num
   }
 
   return { start, end };
-}
-
-function replaceInspirationLine(
-  lines: string[],
-  item: InspirationItem,
-  nextLine: string,
-): boolean {
-  const range = findProjectSectionRange(lines, item.project);
-  if (!range) return false;
-
-  const currentLine = formatInspirationLine(item);
-  for (let i = range.start + 1; i < range.end; i++) {
-    if (lines[i] === currentLine) {
-      lines[i] = nextLine;
-      return true;
-    }
-  }
-  return false;
 }
 
 export async function ensureProjectInspirationsFile(app: App): Promise<TFile> {
@@ -948,6 +978,7 @@ export async function addProjectInspiration(
     status,
     timestamp: formatInspirationTimestamp(),
     text: trimmedText,
+    inspirationId: createInspirationId(),
   });
 
   const range = findProjectSectionRange(lines, trimmedProject);
@@ -967,52 +998,46 @@ export async function updateInspirationStatus(
   app: App,
   item: InspirationItem,
   status: InspirationStatus,
-): Promise<void> {
+): Promise<boolean> {
   const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
-  if (!f) return;
+  if (!f) return false;
 
   const lines = (await app.vault.read(f)).split("\n");
   const nextLine = formatInspirationLine({ ...item, status });
-  if (!replaceInspirationLine(lines, item, nextLine)) return;
+  if (!replaceInspirationLine(lines, item, nextLine)) return false;
   await app.vault.modify(f, lines.join("\n"));
+  return true;
 }
 
 export async function renameProjectInspiration(
   app: App,
   item: InspirationItem,
   newText: string,
-): Promise<void> {
+): Promise<boolean> {
   const trimmed = newText.trim();
-  if (!trimmed) return;
+  if (!trimmed) return false;
 
   const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
-  if (!f) return;
+  if (!f) return false;
 
   const lines = (await app.vault.read(f)).split("\n");
   const nextLine = formatInspirationLine({ ...item, text: trimmed });
-  if (!replaceInspirationLine(lines, item, nextLine)) return;
+  if (!replaceInspirationLine(lines, item, nextLine)) return false;
   await app.vault.modify(f, lines.join("\n"));
+  return true;
 }
 
-export async function deleteProjectInspiration(app: App, item: InspirationItem): Promise<void> {
+export async function deleteProjectInspiration(app: App, item: InspirationItem): Promise<boolean> {
   const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
-  if (!f) return;
+  if (!f) return false;
 
   const lines = (await app.vault.read(f)).split("\n");
-  const range = findProjectSectionRange(lines, item.project);
-  if (!range) return;
+  const index = findInspirationLineIndex(lines, item);
+  if (index < 0) return false;
 
-  const currentLine = formatInspirationLine(item);
-  let changed = false;
-  for (let i = range.start + 1; i < range.end; i++) {
-    if (lines[i] !== currentLine) continue;
-    lines.splice(i, 1);
-    changed = true;
-    break;
-  }
-
-  if (!changed) return;
+  lines.splice(index, 1);
   await app.vault.modify(f, lines.join("\n"));
+  return true;
 }
 
 export function getProjectInspirationsPath(): string {

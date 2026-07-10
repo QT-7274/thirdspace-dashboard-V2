@@ -69,13 +69,24 @@ test("project-inspirations.QUICK_CAPTURE.3 inspirations live in project markdown
   const {
     PROJECT_INSPIRATIONS_PATH,
     formatInspirationLine,
+    parseInspirationLine,
+    inspirationMatchesItem,
   } = await loadVaultReader();
 
   assert.equal(PROJECT_INSPIRATIONS_PATH, "04-项目/project-inspirations.md");
-  assert.equal(
-    formatInspirationLine({ status: "idea", timestamp: "2026-07-09 11:30", text: "demo" }),
-    "- [💡] 2026-07-09 11:30 · demo",
-  );
+  const line = formatInspirationLine({
+    status: "idea",
+    timestamp: "2026-07-09 11:30",
+    text: "demo",
+    inspirationId: "pi-abc123",
+  });
+  assert.equal(line, "- [💡] 2026-07-09 11:30 · demo ^pi-abc123");
+
+  const parsed = parseInspirationLine(line, "thirdspace-dashboard");
+  assert.ok(parsed);
+  assert.equal(parsed.inspirationId, "pi-abc123");
+  assert.equal(parsed.text, "demo");
+  assert.ok(inspirationMatchesItem(parsed, { ...parsed }));
 });
 
 test("project-inspirations.PANEL_RENDER.2 group inspirations by project newest first", async () => {
@@ -99,5 +110,7 @@ test("project-inspirations.PANEL_RENDER.1 bilingual inspirations panel hooks exi
   assert.match(viewSource, /项目灵感 · INSPIRATIONS/);
   assert.match(viewSource, /renderInspirations\(/);
   assert.match(viewSource, /showDiscardedInspirations/);
+  assert.match(viewSource, /requireModifier:\s*true/);
+  assert.match(viewSource, /openFileTimer/);
   assert.match(styles, /\.ts-insp-card/);
 });

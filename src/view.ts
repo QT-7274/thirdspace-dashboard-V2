@@ -1,4 +1,4 @@
-import { ItemView, Modal, WorkspaceLeaf, TFile } from "obsidian";
+import { ItemView, Modal, Notice, WorkspaceLeaf, TFile } from "obsidian";
 import type ThirdSpaceDashboard from "./main";
 import {
   loadWorkspaceIndex, getWorkspaceStats, getDailyActivity,
@@ -319,7 +319,7 @@ class InspirationModal extends Modal {
     cancel.addEventListener("click", () => this.close());
 
     input.addEventListener("keydown", ev => {
-      if (shouldSubmitOnEnter(ev, this.isComposingText)) {
+      if (shouldSubmitOnEnter(ev, this.isComposingText, { requireModifier: true })) {
         ev.preventDefault();
         submit();
       }
@@ -951,7 +951,11 @@ export class DashboardView extends ItemView {
     statusBtn.addEventListener("click", async e => {
       e.stopPropagation();
       const nextStatus = cycleInspirationStatus(item.status);
-      await updateInspirationStatus(this.app, item, nextStatus);
+      const ok = await updateInspirationStatus(this.app, item, nextStatus);
+      if (!ok) {
+        new Notice("未能更新灵感状态，请打开源文件检查");
+        return;
+      }
       await this.refreshInspirationSection();
     });
 
@@ -964,17 +968,29 @@ export class DashboardView extends ItemView {
     delBtn.addEventListener("click", async e => {
       e.stopPropagation();
       if (!confirm("删除这条灵感？")) return;
-      await deleteProjectInspiration(this.app, item);
+      const ok = await deleteProjectInspiration(this.app, item);
+      if (!ok) {
+        new Notice("未能删除灵感，请打开源文件检查");
+        return;
+      }
       await this.refreshInspirationSection();
     });
 
-    row.addEventListener("click", e => {
-      if ((e as MouseEvent).detail >= 2) return;
-      this.openFile(getProjectInspirationsPath());
+    let openFileTimer: number | null = null;
+    row.addEventListener("click", () => {
+      if (openFileTimer) window.clearTimeout(openFileTimer);
+      openFileTimer = window.setTimeout(() => {
+        openFileTimer = null;
+        this.openFile(getProjectInspirationsPath());
+      }, 250);
     });
 
     row.addEventListener("dblclick", e => {
       e.stopPropagation();
+      if (openFileTimer) {
+        window.clearTimeout(openFileTimer);
+        openFileTimer = null;
+      }
       this.isEditingInspiration = true;
       const input = document.createElement("input");
       input.type = "text";
@@ -997,7 +1013,12 @@ export class DashboardView extends ItemView {
           await this.refreshInspirationSection();
           return;
         }
-        await renameProjectInspiration(this.app, item, newText);
+        const ok = await renameProjectInspiration(this.app, item, newText);
+        if (!ok) {
+          new Notice("未能保存灵感修改，请打开源文件检查");
+          await this.refreshInspirationSection();
+          return;
+        }
         await this.refreshInspirationSection();
       };
 

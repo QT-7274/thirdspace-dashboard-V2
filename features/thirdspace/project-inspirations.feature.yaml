@@ -26,6 +26,12 @@ components:
       1: 点击状态图标循环切换状态并写回文件。
       2: 双击行内编辑正文。
       3: 悬停可删除灵感，删除前需确认。
+      4: 每条灵感写入稳定 ID（^pi-...），更新与删除按 ID 匹配。
+
+  MODAL_INPUT:
+    requirements:
+      1: 灵感弹框 textarea 中 Enter 插入换行。
+      2: Ctrl/Cmd+Enter 提交弹框内容。
 
   PROJECT_OPTIONS:
     requirements:
