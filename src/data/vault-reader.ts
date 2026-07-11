@@ -749,3 +749,297 @@ export async function deleteTodoFromWorklog(app: App, item: TodoItem): Promise<v
   }
   if (changed) await app.vault.modify(f, lines.join("\n"));
 }
+
+// ── Project Inspirations ─────────────────────────────────────
+export const PROJECT_INSPIRATIONS_PATH = "04-项目/project-inspirations.md";
+
+export type InspirationStatus = "idea" | "exploring" | "adopted" | "discarded";
+
+export const INSPIRATION_STATUS_ORDER: InspirationStatus[] = [
+  "idea", "exploring", "adopted", "discarded",
+];
+
+export const INSPIRATION_STATUS_META: Record<InspirationStatus, { emoji: string; label: string }> = {
+  idea: { emoji: "💡", label: "新想法" },
+  exploring: { emoji: "🔍", label: "探索中" },
+  adopted: { emoji: "✅", label: "已采纳" },
+  discarded: { emoji: "🗑️", label: "已放弃" },
+};
+
+const INSPIRATION_EMOJI_TO_STATUS = Object.fromEntries(
+  Object.entries(INSPIRATION_STATUS_META).map(([status, meta]) => [meta.emoji, status]),
+) as Record<string, InspirationStatus>;
+
+export interface InspirationItem {
+  project: string;
+  status: InspirationStatus;
+  timestamp: string;
+  text: string;
+  inspirationId?: string;
+}
+
+const INSPIRATION_LINE_RE = /^- \[(💡|🔍|✅|🗑️)\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.+)$/;
+
+function createInspirationId(): string {
+  return `pi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseInspirationId(body: string): string | undefined {
+  return body.match(/(?:^|\s)\^(pi-[A-Za-z0-9_-]+)/)?.[1];
+}
+
+function parseInspirationBody(body: string): { text: string; inspirationId?: string } {
+  const inspirationId = parseInspirationId(body);
+  const text = body.replace(/(?:^|\s)\^pi-[A-Za-z0-9_-]+/g, " ").trim();
+  return inspirationId ? { text, inspirationId } : { text };
+}
+
+export function parseInspirationLine(line: string, project = ""): InspirationItem | null {
+  const match = line.match(INSPIRATION_LINE_RE);
+  if (!match) return null;
+
+  const status = INSPIRATION_EMOJI_TO_STATUS[match[1]];
+  if (!status) return null;
+
+  const body = parseInspirationBody(match[3]);
+  return {
+    project,
+    status,
+    timestamp: match[2],
+    text: body.text,
+    ...(body.inspirationId ? { inspirationId: body.inspirationId } : {}),
+  };
+}
+
+export function formatInspirationTimestamp(d = new Date()): string {
+  return localTimestamp(d).slice(0, 16);
+}
+
+export function formatInspirationLine(
+  item: Pick<InspirationItem, "status" | "timestamp" | "text"> & { inspirationId?: string },
+): string {
+  const emoji = INSPIRATION_STATUS_META[item.status].emoji;
+  const idSuffix = item.inspirationId ? ` ^${item.inspirationId}` : "";
+  return `- [${emoji}] ${item.timestamp} · ${item.text}${idSuffix}`;
+}
+
+export function parseInspirationsFromMd(md: string): InspirationItem[] {
+  const items: InspirationItem[] = [];
+  let currentProject = "";
+
+  for (const line of md.split("\n")) {
+    if (line.startsWith("## ")) {
+      currentProject = line.replace(/^##\s+/, "").trim();
+      continue;
+    }
+    if (!currentProject) continue;
+
+    const parsed = parseInspirationLine(line, currentProject);
+    if (!parsed) continue;
+    items.push(parsed);
+  }
+
+  return items;
+}
+
+export function groupInspirationsByProject(
+  items: InspirationItem[],
+): Array<{ project: string; items: InspirationItem[] }> {
+  const groups = new Map<string, InspirationItem[]>();
+  for (const item of items) {
+    const list = groups.get(item.project) ?? [];
+    list.push(item);
+    groups.set(item.project, list);
+  }
+
+  return Array.from(groups.entries()).map(([project, projectItems]) => ({
+    project,
+    items: projectItems.sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
+  }));
+}
+
+export function collectInspirationProjectOptions(
+  products: Array<{ name: string }>,
+  acaiProducts: string[],
+  inspirations: InspirationItem[],
+): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  const add = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    result.push(trimmed);
+  };
+
+  for (const product of products) add(product.name);
+  for (const product of acaiProducts) add(product);
+  for (const item of inspirations) add(item.project);
+
+  return result.sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+export function cycleInspirationStatus(status: InspirationStatus): InspirationStatus {
+  const index = INSPIRATION_STATUS_ORDER.indexOf(status);
+  return INSPIRATION_STATUS_ORDER[(index + 1) % INSPIRATION_STATUS_ORDER.length];
+}
+
+export function inspirationMatchesItem(a: InspirationItem, b: InspirationItem): boolean {
+  if (a.inspirationId && b.inspirationId) return a.inspirationId === b.inspirationId;
+  return a.project === b.project
+    && a.timestamp === b.timestamp
+    && a.text === b.text
+    && a.status === b.status;
+}
+
+function findInspirationLineIndex(lines: string[], item: InspirationItem): number {
+  const range = findProjectSectionRange(lines, item.project);
+  if (!range) return -1;
+
+  for (let i = range.start + 1; i < range.end; i++) {
+    const parsed = parseInspirationLine(lines[i], item.project);
+    if (!parsed) continue;
+    if (inspirationMatchesItem(parsed, item)) return i;
+  }
+  return -1;
+}
+
+function replaceInspirationLine(
+  lines: string[],
+  item: InspirationItem,
+  nextLine: string,
+): boolean {
+  const index = findInspirationLineIndex(lines, item);
+  if (index < 0) return false;
+  lines[index] = nextLine;
+  return true;
+}
+
+function findProjectSectionRange(lines: string[], project: string): { start: number; end: number } | null {
+  const header = `## ${project}`;
+  let start = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === header) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return null;
+
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].startsWith("## ")) {
+      end = i;
+      break;
+    }
+  }
+
+  return { start, end };
+}
+
+export async function ensureProjectInspirationsFile(app: App): Promise<TFile> {
+  const existing = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
+  if (existing) return existing;
+
+  const folder = app.vault.getAbstractFileByPath("04-项目");
+  if (!folder) await app.vault.createFolder("04-项目");
+
+  return app.vault.create(
+    PROJECT_INSPIRATIONS_PATH,
+    "# 项目灵感 Project Inspirations\n\n",
+  );
+}
+
+export async function loadProjectInspirations(app: App): Promise<InspirationItem[]> {
+  try {
+    const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
+    if (!f) return [];
+    return parseInspirationsFromMd(await app.vault.read(f));
+  } catch {
+    return [];
+  }
+}
+
+export async function addProjectInspiration(
+  app: App,
+  project: string,
+  text: string,
+  status: InspirationStatus = "idea",
+): Promise<void> {
+  const trimmedProject = project.trim();
+  const trimmedText = text.trim();
+  if (!trimmedProject || !trimmedText) return;
+
+  const f = await ensureProjectInspirationsFile(app);
+  const lines = (await app.vault.read(f)).split("\n");
+  const line = formatInspirationLine({
+    status,
+    timestamp: formatInspirationTimestamp(),
+    text: trimmedText,
+    inspirationId: createInspirationId(),
+  });
+
+  const range = findProjectSectionRange(lines, trimmedProject);
+  if (!range) {
+    if (lines.length > 0 && lines[lines.length - 1].trim() !== "") lines.push("");
+    lines.push(`## ${trimmedProject}`, "", line);
+  } else {
+    let insertAt = range.end;
+    while (insertAt > range.start + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+    lines.splice(insertAt, 0, line);
+  }
+
+  await app.vault.modify(f, lines.join("\n"));
+}
+
+export async function updateInspirationStatus(
+  app: App,
+  item: InspirationItem,
+  status: InspirationStatus,
+): Promise<boolean> {
+  const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
+  if (!f) return false;
+
+  const lines = (await app.vault.read(f)).split("\n");
+  const nextLine = formatInspirationLine({ ...item, status });
+  if (!replaceInspirationLine(lines, item, nextLine)) return false;
+  await app.vault.modify(f, lines.join("\n"));
+  return true;
+}
+
+export async function renameProjectInspiration(
+  app: App,
+  item: InspirationItem,
+  newText: string,
+): Promise<boolean> {
+  const trimmed = newText.trim();
+  if (!trimmed) return false;
+
+  const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
+  if (!f) return false;
+
+  const lines = (await app.vault.read(f)).split("\n");
+  const nextLine = formatInspirationLine({ ...item, text: trimmed });
+  if (!replaceInspirationLine(lines, item, nextLine)) return false;
+  await app.vault.modify(f, lines.join("\n"));
+  return true;
+}
+
+export async function deleteProjectInspiration(app: App, item: InspirationItem): Promise<boolean> {
+  const f = app.vault.getAbstractFileByPath(PROJECT_INSPIRATIONS_PATH) as TFile | null;
+  if (!f) return false;
+
+  const lines = (await app.vault.read(f)).split("\n");
+  const index = findInspirationLineIndex(lines, item);
+  if (index < 0) return false;
+
+  lines.splice(index, 1);
+  await app.vault.modify(f, lines.join("\n"));
+  return true;
+}
+
+export function getProjectInspirationsPath(): string {
+  return PROJECT_INSPIRATIONS_PATH;
+}

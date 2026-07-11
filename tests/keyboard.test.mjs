@@ -34,3 +34,11 @@ test("shouldSubmitOnEnter accepts normal Enter only", async () => {
   assert.equal(shouldSubmitOnEnter({ key: "a" }), false);
   assert.equal(shouldSubmitOnEnter({ key: "Enter" }), true);
 });
+
+test("shouldSubmitOnEnter can require Ctrl/Cmd+Enter for multiline inputs", async () => {
+  const { shouldSubmitOnEnter } = await loadKeyboardUtils();
+
+  assert.equal(shouldSubmitOnEnter({ key: "Enter" }, false, { requireModifier: true }), false);
+  assert.equal(shouldSubmitOnEnter({ key: "Enter", ctrlKey: true }, false, { requireModifier: true }), true);
+  assert.equal(shouldSubmitOnEnter({ key: "Enter", metaKey: true }, false, { requireModifier: true }), true);
+});
