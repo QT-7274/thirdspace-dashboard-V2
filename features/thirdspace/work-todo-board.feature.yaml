@@ -15,12 +15,18 @@ components:
     requirements:
       1: The `#工作` tag is visually more prominent than other todo tags when rendered on the dashboard.
       2: Today's todo rows render markdown tags as metadata chips instead of mixing them into the todo title.
-      3: `WORK TODOS` 卡片内的逾期分组必须在视觉上区别于其他工作任务分组。
+      3: "`WORK TODOS` 卡片内的逾期分组必须在视觉上区别于其他工作任务分组。"
 
   PAGINATION:
     requirements:
-      1: scoped todo 分组存在隐藏任务时，`+x more` 必须作为可点击控件继续展示下一批隐藏任务。
-      2: 指定日期任务使用相同分页展开行为，逾期日期不能阻止展开。
+      1:
+        requirement: scoped todo 分组存在隐藏任务时，`+x more` 必须作为可点击控件继续展示下一批隐藏任务。
+        deprecated: true
+        note: 已由 dashboard-experience-refinement.EXPANDABLE_LISTS.1 的展开全部和收起行为替代。
+      2:
+        requirement: 指定日期任务使用相同分页展开行为，逾期日期不能阻止展开。
+        deprecated: true
+        note: 已由 dashboard-experience-refinement.EXPANDABLE_LISTS.1 的展开全部和收起行为替代。
 
 constraints:
   COMPATIBILITY:
