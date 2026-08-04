@@ -1431,10 +1431,17 @@ body.theme-dark .ts-acai-status { background: var(--surface); }
 }
 .ts-project-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 .ts-project-pane { min-width: 0; }
+.ts-project-bug-pane {
+  border-left: 2px solid rgba(178, 67, 52, .35);
+  padding-left: 8px;
+}
+.ts-project-bug-pane .ts-project-pane-title,
+.ts-project-bug-pane .ts-project-action,
+.ts-project-count--bugs { color: #a43f32; }
 .ts-project-pane-head {
   display: flex;
   align-items: center;
@@ -1502,6 +1509,50 @@ body.theme-dark .ts-acai-status { background: var(--surface); }
   margin-top: 3px;
   color: var(--ink-2);
 }
+.ts-project-chip,
+.ts-project-assign-trigger {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.ts-project-chip {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 3px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-project-assign-trigger {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 50%;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease, border-color .12s ease;
+}
+.ts-todo-row:hover .ts-project-assign-trigger,
+.ts-todo-row:focus-within .ts-project-assign-trigger,
+.ts-scoped-row:hover .ts-project-assign-trigger,
+.ts-scoped-row:focus-within .ts-project-assign-trigger,
+.ts-project-todo-row:hover .ts-project-assign-trigger,
+.ts-project-todo-row:focus-within .ts-project-assign-trigger,
+.ts-project-assign-trigger:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ts-project-chip:hover,
+.ts-project-assign-trigger:hover { border-color: var(--rust); color: var(--rust); }
+.ts-project-chip:focus-visible,
+.ts-project-assign-trigger:focus-visible { outline: 2px solid var(--rust); outline-offset: 1px; }
 .ts-project-select--modal { display: block; width: 100%; margin: 0 0 8px; padding: 6px 8px; font-family: var(--sans); font-size: 12px; }
 .ts-project-select:focus,
 .ts-project-filter:focus { border-color: var(--rust); outline: none; }
@@ -1521,5 +1572,6 @@ body.theme-dark .ts-project-status--active { color: #6BAA6B; }
   .ts-project-chevron { grid-column: 2; grid-row: 1; }
   .ts-project-milestone { flex-basis: 100%; }
   .ts-project-columns { grid-template-columns: 1fr; }
+  .ts-project-bug-pane { border-left: 0; padding-left: 0; }
   .ts-project-acai-pane { margin-top: 10px; }
 }

@@ -2,17 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("work-todo-board.PAGINATION.1 scoped todo more control is a button", () => {
+test("dashboard-experience-refinement.EXPANDABLE_LISTS.1 uses shared expand and collapse controls", () => {
   const source = readFileSync("src/view.ts", "utf8");
 
-  assert.match(
-    source,
-    /createEl\("button",\s*\{\s*cls:\s*"ts-todo-more",\s*text:\s*`\+\$\{remaining\} more`\s*\}\)/,
-  );
-  assert.doesNotMatch(
-    source,
-    /createDiv\(\{\s*cls:\s*"ts-todo-more",\s*text:\s*`\+\$\{remaining\} more`\s*\}\)/,
-  );
+  assert.match(source, /renderListToggle\(/);
+  assert.match(source, /text: expanded \? "收起" : `展开全部（\+\$\{remaining\}）`/);
+  assert.match(source, /expandedListKeys/);
+  assert.doesNotMatch(source, /ts-todo-more[\s\S]{0,240}openFile\(getTaskPoolPath\(\)\)/);
+  assert.doesNotMatch(source, /ts-todo-more[\s\S]{0,240}openFile\(getTodayWorklogPath\(\)\)/);
 });
 
 test("work-todo-board.WORK_BOARD.4 overdue scoped todos stay inside their routed card", () => {
@@ -60,10 +57,21 @@ test("project-centered-dashboard.TODO_FORMAT.3 exposes project selectors in task
   const styles = readFileSync("src/styles.css", "utf8");
 
   assert.match(source, /ts-project-filter/);
-  assert.match(source, /ts-project-select/);
+  assert.match(source, /ts-project-chip/);
+  assert.match(source, /ts-project-assign-trigger/);
   assert.match(source, /updateTodoProject/);
   assert.match(styles, /\.ts-project-card/);
   assert.match(styles, /@media \(max-width: 680px\)/);
+});
+
+test("dashboard-experience-refinement.PROJECT_BUGS.1 partitions project bugs and presets the modal", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+
+  assert.match(source, /pendingTodos\.filter\(isBugTodo\)/);
+  assert.match(source, /pendingTodos\.filter\(item => !isBugTodo\(item\)\)/);
+  assert.match(source, /text: "BUG"/);
+  assert.match(source, /openTodoModal\(project\.id, \["bug"\]\)/);
+  assert.match(source, /renderProjectTodoList\(bugPane, pendingBugs/);
 });
 
 test("project-centered-dashboard.TODO_FORMAT.5 discovered projects feed todo selectors", () => {

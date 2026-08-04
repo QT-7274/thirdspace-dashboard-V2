@@ -11,3 +11,8 @@ export function getNextVisibleCount(
 export function getRemainingCount(total: number, visible: number): number {
   return Math.max(0, total - visible);
 }
+
+// dashboard-experience-refinement.EXPANDABLE_LISTS.1
+export function getVisibleCount(defaultVisible: number, total: number, expanded: boolean): number {
+  return expanded ? total : Math.min(defaultVisible, total);
+}

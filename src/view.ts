@@ -1,4 +1,4 @@
-import { ItemView, Modal, Notice, WorkspaceLeaf, TFile } from "obsidian";
+import { ItemView, Menu, Modal, Notice, WorkspaceLeaf, TFile } from "obsidian";
 import type ThirdSpaceDashboard from "./main";
 import {
   loadWorkspaceIndex, getWorkspaceStats, getDailyActivity,
@@ -8,7 +8,7 @@ import {
   loadTodos, loadTodayWorklog, getVaultStats, getTodayWorklogPath, getTaskPoolPath,
   loadScopedTodos, addScopedTodo, addScopedTodoToToday, toggleTodoInWorklog, renameTodoInWorklog, isWorkTodo,
   isTodoOverdue, sortTodosByUrgency, categorizeScopedOverdue,
-  loadCarryOverTodos, addCarryOverTodoToToday, deleteTodoFromWorklog,
+  loadCarryOverTodos, addCarryOverTodoToToday, deleteTodoFromWorklog, isBugTodo,
   loadProjectInspirations, addProjectInspiration, updateInspirationStatus,
   renameProjectInspiration, deleteProjectInspiration, getProjectInspirationsPath,
   groupInspirationsByProject, collectInspirationProjectOptions, cycleInspirationStatus,
@@ -20,7 +20,7 @@ import {
 import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
 import { shouldSubmitOnEnter } from "./utils/keyboard";
-import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getNextVisibleCount, getRemainingCount } from "./utils/pagination";
+import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getRemainingCount, getVisibleCount } from "./utils/pagination";
 import {
   fetchImplementationFeatures, fetchImplementations, fetchFeatureContext, patchFeatureStates,
   ACAI_STATE_OPTIONS,
@@ -80,7 +80,7 @@ const TODO_SCOPE_OPTIONS: Array<{ scope: TaskScope; label: string }> = [
   { scope: "longterm", label: "长期" },
   { scope: "custom", label: "指定日期" },
 ];
-const TODO_TAG_OPTIONS = ["工作", "项目", "学习", "生活", "插件"];
+const TODO_TAG_OPTIONS = ["工作", "项目", "学习", "生活", "插件", "bug"];
 type ScopedTodoSectionKey = ScopedTodoItem["scope"] | "overdue";
 
 function getScopedTodoSectionKey(item: ScopedTodoItem): ScopedTodoSectionKey {
@@ -103,11 +103,13 @@ class TodoModal extends Modal {
     app: any,
     projectOptions: ProjectItem[] = [],
     defaultProjectId = "",
+    defaultTags: string[] = [],
     onSubmit: (input: ScopedTodoInput) => void = () => {},
   ) {
     super(app);
     this.projectOptions = projectOptions;
     this.selectedProjectId = defaultProjectId;
+    this.tags = new Set(defaultTags);
     this.onSubmit = onSubmit;
   }
 
@@ -145,6 +147,7 @@ class TodoModal extends Modal {
     for (const tag of TODO_TAG_OPTIONS) {
       const btn = tagRow.createEl("button", { text: tag, cls: "ts-chip" });
       btn.type = "button";
+      if (this.tags.has(tag)) btn.addClass("ts-chip--active");
       btn.addEventListener("click", () => {
         if (this.tags.has(tag)) {
           this.tags.delete(tag);
@@ -395,7 +398,7 @@ export class DashboardView extends ItemView {
   private timer: number | null = null;
   private snakeRouteCache: SnakeRouteCache | null = null;
   private snakeReplayTimer: number | null = null;
-  private scopedVisibleCounts: Record<string, number> = {};
+  private expandedListKeys = new Set<string>();
   private isEditingTodo = false;
   private refreshPending = false;
   private carryOverCache: { date: string; items: TodoItem[] } | null = null;
@@ -637,6 +640,9 @@ export class DashboardView extends ItemView {
       });
       const projectTodos = this.getProjectTodoItems(project, todos, scopedTodos);
       const pendingTodos = projectTodos.filter(item => !item.done);
+      // dashboard-experience-refinement.PROJECT_BUGS.1
+      const pendingBugs = pendingTodos.filter(isBugTodo);
+      const pendingRegularTodos = pendingTodos.filter(item => !isBugTodo(item));
       const projectInspirations = this.getProjectInspirations(project, inspirations);
       const activeInspirations = projectInspirations.filter(item => item.status !== "discarded");
 
@@ -657,7 +663,8 @@ export class DashboardView extends ItemView {
       const summary = toggle.createSpan({ cls: "ts-project-summary" });
       summary.createSpan({ cls: `ts-project-status ts-project-status--${project.status}`, text: project.status });
       if (project.milestone) summary.createSpan({ cls: "ts-project-milestone", text: project.milestone });
-      summary.createSpan({ cls: "ts-project-count", text: `${pendingTodos.length} tasks` });
+      summary.createSpan({ cls: "ts-project-count", text: `${pendingRegularTodos.length} tasks` });
+      summary.createSpan({ cls: "ts-project-count ts-project-count--bugs", text: `${pendingBugs.length} bugs` });
       summary.createSpan({ cls: "ts-project-count", text: `${activeInspirations.length} inspirations` });
       summary.createSpan({ cls: "ts-project-acai-state", text: this.expandedProjectId === project.id ? "ACAI" : "ACAI 待加载" });
       const chevron = toggle.createSpan({ cls: "ts-project-chevron" });
@@ -673,14 +680,21 @@ export class DashboardView extends ItemView {
       todoHead.createSpan({ cls: "ts-project-pane-title", text: "TODO" });
       const addTodo = todoHead.createEl("button", { cls: "ts-project-action", text: "+ 添加任务", type: "button" });
       addTodo.addEventListener("click", () => this.openTodoModal(project.id));
-      this.renderProjectTodoList(todoPane, projectTodos);
+      this.renderProjectTodoList(todoPane, pendingRegularTodos, `project:${project.id}:todo`);
+
+      const bugPane = columns.createDiv({ cls: "ts-project-pane ts-project-bug-pane" });
+      const bugHead = bugPane.createDiv({ cls: "ts-project-pane-head" });
+      bugHead.createSpan({ cls: "ts-project-pane-title", text: "BUG" });
+      const addBug = bugHead.createEl("button", { cls: "ts-project-action", text: "+ 记录 Bug", type: "button" });
+      addBug.addEventListener("click", () => this.openTodoModal(project.id, ["bug"]));
+      this.renderProjectTodoList(bugPane, pendingBugs, `project:${project.id}:bug`);
 
       const inspirationPane = columns.createDiv({ cls: "ts-project-pane ts-project-inspiration-pane" });
       const inspirationHead = inspirationPane.createDiv({ cls: "ts-project-pane-head" });
       inspirationHead.createSpan({ cls: "ts-project-pane-title", text: "项目灵感 · INSPIRATIONS" });
       const addInspiration = inspirationHead.createEl("button", { cls: "ts-project-action", text: "+ 记灵感", type: "button" });
       addInspiration.addEventListener("click", () => this.openInspirationModal(project.id));
-      this.renderProjectInspirations(inspirationPane, projectInspirations);
+      this.renderProjectInspirations(inspirationPane, projectInspirations, `project:${project.id}:inspirations`);
 
       const acaiPane = body.createDiv({ cls: "ts-project-acai-pane" });
       acaiPane.createDiv({ cls: "ts-project-pane-title", text: "ACAI" });
@@ -688,14 +702,15 @@ export class DashboardView extends ItemView {
     }
   }
 
-  private renderProjectTodoList(parent: HTMLElement, items: ProjectTodo[]) {
+  private renderProjectTodoList(parent: HTMLElement, items: ProjectTodo[], listKey: string) {
     const pending = items.filter(item => !item.done);
     if (pending.length === 0) {
       parent.createDiv({ cls: "ts-empty", text: "暂无未完成任务" });
       return;
     }
     const list = parent.createDiv({ cls: "ts-project-todo-list" });
-    for (const item of pending.slice(0, 12)) {
+    const visibleCount = getVisibleCount(12, pending.length, this.expandedListKeys.has(listKey));
+    for (const item of pending.slice(0, visibleCount)) {
       if ("scope" in item) {
         const row = list.createDiv({ cls: "ts-project-todo-row" });
         row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
@@ -713,16 +728,19 @@ export class DashboardView extends ItemView {
         this.renderTodoRow(list, item);
       }
     }
+    this.renderListToggle(list, listKey, pending.length, 12);
   }
 
-  private renderProjectInspirations(parent: HTMLElement, items: InspirationItem[]) {
+  private renderProjectInspirations(parent: HTMLElement, items: InspirationItem[], listKey: string) {
     const visible = items.filter(item => this.showDiscardedInspirations || item.status !== "discarded");
     if (visible.length === 0) {
       parent.createDiv({ cls: "ts-empty", text: "暂无灵感" });
       return;
     }
     const list = parent.createDiv({ cls: "ts-project-inspiration-list" });
-    for (const item of visible.slice(0, 8)) this.renderInspirationRow(list, item);
+    const visibleCount = getVisibleCount(8, visible.length, this.expandedListKeys.has(listKey));
+    for (const item of visible.slice(0, visibleCount)) this.renderInspirationRow(list, item);
+    this.renderListToggle(list, listKey, visible.length, 8);
     const discardedCount = items.filter(item => item.status === "discarded").length;
     if (discardedCount > 0) {
       const toggle = parent.createEl("button", {
@@ -807,26 +825,48 @@ export class DashboardView extends ItemView {
     filter.value = this.projectFilterId;
     filter.addEventListener("change", () => {
       this.projectFilterId = filter.value;
+      this.expandedListKeys.clear();
+      void this.render();
+    });
+  }
+
+  // dashboard-experience-refinement.EXPANDABLE_LISTS.1 dashboard-experience-refinement.EXPANDABLE_LISTS.2
+  private renderListToggle(parent: HTMLElement, key: string, total: number, initialVisible: number) {
+    const expanded = this.expandedListKeys.has(key);
+    const visible = getVisibleCount(initialVisible, total, expanded);
+    const remaining = getRemainingCount(total, visible);
+    if (!expanded && remaining <= 0) return;
+
+    const toggle = parent.createEl("button", {
+      cls: "ts-todo-more",
+      text: expanded ? "收起" : `展开全部（+${remaining}）`,
+      type: "button",
+    });
+    toggle.addEventListener("click", event => {
+      event.stopPropagation();
+      if (expanded) this.expandedListKeys.delete(key);
+      else this.expandedListKeys.add(key);
       void this.render();
     });
   }
 
   private renderProjectSelector(parent: HTMLElement, item: ProjectTodo) {
-    const select = parent.createEl("select", { cls: "ts-project-select" });
-    select.createEl("option", { value: "", text: "+ 选择项目" });
-    for (const project of this.projects) {
-      select.createEl("option", { value: project.id, text: project.name });
-    }
-    select.value = item.projectId ?? "";
-    if (item.projectTagIssue) select.setAttr("title", "项目标签格式异常，请重新选择");
+    // dashboard-experience-refinement.COMPACT_PROJECT_ASSIGNMENT.1
+    const project = this.projects.find(candidate => candidate.id === item.projectId);
+    const control = parent.createEl("button", {
+      cls: project ? "ts-project-chip" : "ts-project-assign-trigger",
+      text: project?.name ?? "+",
+      type: "button",
+    });
+    control.setAttr("aria-label", project ? `修改项目归属：${project.name}` : "选择项目");
+    if (item.projectTagIssue) control.setAttr("title", "项目标签格式异常，请重新选择");
     const stop = (event: Event) => event.stopPropagation();
-    select.addEventListener("click", stop);
-    select.addEventListener("mousedown", stop);
-    select.addEventListener("change", async event => {
-      event.stopPropagation();
+    control.addEventListener("mousedown", stop);
+
+    const updateProject = async (next: string | undefined) => {
       const previous = item.projectId;
-      const next = select.value || undefined;
-      select.disabled = true;
+      if (next === previous && !item.projectTagIssue) return;
+      control.disabled = true;
       try {
         const changed = await updateTodoProject(this.app, item, next);
         if (!changed) throw new Error("Todo source was not found");
@@ -835,13 +875,28 @@ export class DashboardView extends ItemView {
         await this.render();
       } catch (err) {
         item.projectId = previous;
-        select.value = previous ?? "";
         new Notice(`项目归属保存失败：${err instanceof Error ? err.message : String(err)}`);
       } finally {
-        select.disabled = false;
+        control.disabled = false;
       }
+    };
+
+    control.addEventListener("click", event => {
+      event.stopPropagation();
+      const menu = new Menu();
+      menu.addItem(menuItem => menuItem
+        .setTitle("未归属")
+        .setChecked(!item.projectId)
+        .onClick(() => { void updateProject(undefined); }));
+      for (const option of this.projects) {
+        menu.addItem(menuItem => menuItem
+          .setTitle(option.name)
+          .setChecked(option.id === item.projectId)
+          .onClick(() => { void updateProject(option.id); }));
+      }
+      menu.showAtMouseEvent(event);
     });
-    return select;
+    return control;
   }
 
   // ── Todos (from today's worklog ## 今日Todo)
@@ -859,12 +914,10 @@ export class DashboardView extends ItemView {
     }
     const list = parent.createDiv({ cls: "ts-todo-list" });
     const SHOW = 8;
-    for (const item of pending.slice(0, SHOW)) this.renderTodoRow(list, item, projects);
-    if (pending.length > SHOW) {
-      const m = list.createDiv({ cls: "ts-todo-more" });
-      m.setText(`+${pending.length - SHOW} more`);
-      m.addEventListener("click", () => this.openFile(getTodayWorklogPath()));
-    }
+    const listKey = `today:${this.projectFilterId}`;
+    const visibleCount = getVisibleCount(SHOW, pending.length, this.expandedListKeys.has(listKey));
+    for (const item of pending.slice(0, visibleCount)) this.renderTodoRow(list, item, projects);
+    this.renderListToggle(list, listKey, pending.length, SHOW);
     if (done.length > 0)
       list.createDiv({ cls: "ts-todo-done-hint", text: `✓ ${done.length} completed` });
   }
@@ -890,10 +943,13 @@ export class DashboardView extends ItemView {
       // todo-overdue-and-edge-cases.URGENCY_SORT.2 work-todo-board.WORK_BOARD.4
       const group = sortTodosByUrgency(filteredItems.filter(item => getScopedTodoSectionKey(item) === section));
       if (group.length === 0) continue;
-      const visibleKey = `${bucket}:${section}`;
-      const visibleCount = this.scopedVisibleCounts[visibleKey] ?? DEFAULT_SCOPED_TASK_BATCH_SIZE;
+      const visibleKey = `${bucket}:${this.projectFilterId}:${section}`;
+      const visibleCount = getVisibleCount(
+        DEFAULT_SCOPED_TASK_BATCH_SIZE,
+        group.length,
+        this.expandedListKeys.has(visibleKey),
+      );
       const visibleItems = group.slice(0, visibleCount);
-      const remaining = getRemainingCount(group.length, visibleItems.length);
       const isOverdueSection = section === "overdue";
 
       const sec = list.createDiv({ cls: `ts-scoped-section${isOverdueSection ? " ts-scoped-section--overdue" : ""}` });
@@ -921,16 +977,7 @@ export class DashboardView extends ItemView {
         });
       }
 
-      if (remaining > 0) {
-        // work-todo-board.PAGINATION.1 work-todo-board.PAGINATION.2
-        const more = sec.createEl("button", { cls: "ts-todo-more", text: `+${remaining} more` });
-        more.type = "button";
-        more.addEventListener("click", e => {
-          e.stopPropagation();
-          this.scopedVisibleCounts[visibleKey] = getNextVisibleCount(visibleItems.length, group.length);
-          this.render();
-        });
-      }
+      this.renderListToggle(sec, visibleKey, group.length, DEFAULT_SCOPED_TASK_BATCH_SIZE);
     }
   }
 
@@ -954,7 +1001,9 @@ export class DashboardView extends ItemView {
     const sorted = sortTodosByUrgency(routedItems.filter(item => this.projectMatches(item)));
     const list = parent.createDiv({ cls: "ts-scoped-list" });
     const SHOW = 8;
-    for (const item of sorted.slice(0, SHOW)) {
+    const listKey = `overdue:${this.projectFilterId}`;
+    const visibleCount = getVisibleCount(SHOW, sorted.length, this.expandedListKeys.has(listKey));
+    for (const item of sorted.slice(0, visibleCount)) {
       const row = list.createDiv({ cls: "ts-scoped-row ts-scoped-row--overdue" });
       row.addEventListener("click", () => this.openFile(getTaskPoolPath()));
       const info = row.createDiv({ cls: "ts-scoped-info" });
@@ -971,10 +1020,7 @@ export class DashboardView extends ItemView {
         addBtn.disabled = true;
       });
     }
-    if (sorted.length > SHOW) {
-      list.createDiv({ cls: "ts-todo-more", text: `+${sorted.length - SHOW} more` })
-        .addEventListener("click", () => this.openFile(getTaskPoolPath()));
-    }
+    this.renderListToggle(list, listKey, sorted.length, SHOW);
   }
 
   // ── Carry-over todos from previous day ───────────────────────
@@ -1849,8 +1895,11 @@ export class DashboardView extends ItemView {
     if (log) await this.app.workspace.getLeaf(false).openFile(log);
     else this.openWorkspace("02-日记");
   }
-  private openTodoModal(defaultProjectId = this.projectFilterId && this.projectFilterId !== "__unassigned__" ? this.projectFilterId : "") {
-    new TodoModal(this.app, this.projects, defaultProjectId, async (input) => {
+  private openTodoModal(
+    defaultProjectId = this.projectFilterId && this.projectFilterId !== "__unassigned__" ? this.projectFilterId : "",
+    defaultTags: string[] = [],
+  ) {
+    new TodoModal(this.app, this.projects, defaultProjectId, defaultTags, async (input) => {
       await addScopedTodo(this.app, input);
       if (input.scope === "today") await this.refreshTodoSection();
       else await this.render();
@@ -1882,6 +1931,7 @@ export class DashboardView extends ItemView {
 
     const todos   = await loadTodos(this.app);
     const pending = todos.filter(t => !t.done);
+    this.expandedListKeys.clear();
 
     // 更新 pending 计数
     const meta = todoCard.querySelector<HTMLElement>(".ts-todo-meta");
