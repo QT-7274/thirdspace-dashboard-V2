@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -41,4 +41,15 @@ test("dashboard-experience-refinement.ACAI_SYNC.1 deduplicates and sorts discove
     }),
     ["edgeone-pages-console", "tef-cli"],
   );
+});
+
+test("dashboard-experience-refinement.ACAI_SYNC.1-.3 settings expose sync and checked Product registration", () => {
+  const source = readFileSync("src/main.ts", "utf8");
+
+  assert.match(source, /acaiAvailableProducts: string\[\]/);
+  assert.match(source, /fetchAllAcaiProducts/);
+  assert.match(source, /registerAcaiProduct/);
+  assert.match(source, /setName\("同步 ACAI 项目"\)/);
+  assert.match(source, /addToggle/);
+  assert.doesNotMatch(source, /setName\("Products to Track"\)/);
 });
