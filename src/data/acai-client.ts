@@ -142,6 +142,22 @@ export async function fetchImplementations(
   return requestAcaiData<AcaiImplementationsData>(url, token, "implementations");
 }
 
+// dashboard-experience-refinement.ACAI_SYNC.1
+export function collectAcaiProductNames(data: AcaiImplementationsData | null): string[] {
+  return Array.from(new Set(
+    (data?.implementations ?? [])
+      .map(item => item.product_name?.trim())
+      .filter((name): name is string => Boolean(name)),
+  )).sort((left, right) => left.localeCompare(right));
+}
+
+// dashboard-experience-refinement.ACAI_SYNC.1
+export async function fetchAllAcaiProducts(baseUrl: string, token: string): Promise<string[]> {
+  const url = `${baseUrl}/api/v1/implementations`;
+  const data = await requestAcaiData<AcaiImplementationsData>(url, token, "implementations");
+  return collectAcaiProductNames(data);
+}
+
 export async function fetchFeatureContext(
   baseUrl: string,
   token: string,

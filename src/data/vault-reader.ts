@@ -64,6 +64,7 @@ const DEFAULT_WORKSPACES = [
 ];
 const WEEKDAYS = ["日","一","二","三","四","五","六"];
 const TASK_POOL_PATH = "00-系统/tasks.md";
+export const PRODUCT_STATUS_PATH = "04-项目/product-status.md";
 const TASK_SCOPE_LABELS: Record<Exclude<TaskScope, "today">, string> = {
   week: "本周",
   month: "本月",
@@ -169,7 +170,7 @@ export function getRecentFiles(app: App, days = 7) {
 // ── Products ─────────────────────────────────────────────────
 export async function loadProductStatus(app: App): Promise<string | null> {
   try {
-    const f = app.vault.getAbstractFileByPath("04-项目/product-status.md") as TFile|null;
+    const f = app.vault.getAbstractFileByPath(PRODUCT_STATUS_PATH) as TFile|null;
     if (f) return await app.vault.read(f);
   } catch {}
   return null;
@@ -222,6 +223,76 @@ export function parseProducts(md: string): ProjectItem[] {
 }
 
 export const parseProjects = parseProducts;
+
+export function formatProjectDisplayName(product: string): string {
+  return product
+    .split("-")
+    .filter(Boolean)
+    .map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function buildProductStatusTemplate(): string {
+  return "# 项目状态\n\n## 🟢 进行中\n\n## 🟡 观察中\n\n## 🔴 已暂停\n";
+}
+
+// dashboard-experience-refinement.PROJECT_REGISTRATION.1 dashboard-experience-refinement.PROJECT_REGISTRATION.2
+export function ensureAcaiProductRegisteredInMd(md: string, product: string): string {
+  const trimmedProduct = product.trim();
+  if (!trimmedProduct) return md;
+
+  const projectId = normalizeProjectId(trimmedProduct);
+  const alreadyRegistered = parseProducts(md).some(project =>
+    project.id === projectId || project.acaiProduct === trimmedProduct,
+  ) || md.split("\n").some(line => {
+    const value = line.match(/(?:项目标识|Project ID|ACAI Product|Acai Product)\s*[:：]\s*(.+)$/i)?.[1]?.trim();
+    return value === projectId || value === trimmedProduct;
+  });
+  if (alreadyRegistered) return md;
+
+  const source = md.trim() ? md : buildProductStatusTemplate();
+  const lines = source.replace(/\n+$/, "").split("\n");
+  let activeIndex = lines.findIndex(line => /^##\s+.*🟢/.test(line));
+  if (activeIndex < 0) {
+    lines.push("", "## 🟢 进行中", "");
+    activeIndex = lines.length - 2;
+  }
+
+  let insertAt = activeIndex + 1;
+  while (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
+  lines.splice(insertAt, 0,
+    `### ${formatProjectDisplayName(trimmedProduct)}`,
+    `- 项目标识：${projectId}`,
+    `- ACAI Product：${trimmedProduct}`,
+    "- 当前里程碑：待补充",
+    "",
+  );
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+// dashboard-experience-refinement.ACAI_SYNC.3
+export async function registerAcaiProduct(app: App, product: string): Promise<ProjectItem> {
+  const existing = app.vault.getAbstractFileByPath(PRODUCT_STATUS_PATH) as TFile | null;
+  let next: string;
+  if (existing) {
+    const current = await app.vault.read(existing);
+    next = ensureAcaiProductRegisteredInMd(current, product);
+    if (next !== current) await app.vault.modify(existing, next);
+  } else {
+    if (!app.vault.getAbstractFileByPath("04-项目")) await app.vault.createFolder("04-项目");
+    next = ensureAcaiProductRegisteredInMd("", product);
+    await app.vault.create(PRODUCT_STATUS_PATH, next);
+  }
+
+  const projectId = normalizeProjectId(product);
+  return parseProducts(next).find(project => project.id === projectId || project.acaiProduct === product) ?? {
+    id: projectId,
+    name: formatProjectDisplayName(product),
+    status: "active",
+    milestone: "待补充",
+    acaiProduct: product,
+  };
+}
 
 export function resolveProjectIdForName(name: string, projects: ProjectItem[]): string | undefined {
   const trimmed = name.trim();
@@ -315,6 +386,11 @@ export function parseProjectTags(tags: string[]): ParsedProjectTags {
 export function isWorkTodo(item: { tags?: string[] }): boolean {
   // work-todo-board.COMPATIBILITY.1
   return uniqueTags(item.tags).includes(WORK_TODO_TAG);
+}
+
+// dashboard-experience-refinement.BUG_VIEW.1
+export function isBugTodo(item: { tags?: string[] }): boolean {
+  return uniqueTags(item.tags).some(tag => tag.toLowerCase() === "bug");
 }
 
 function isValidDueDate(dueDate: string | undefined): dueDate is string {

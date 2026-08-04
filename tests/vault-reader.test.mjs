@@ -169,6 +169,25 @@ test("project-centered-dashboard.PROJECT_REGISTRY.1 parses stable ids and option
   }]);
 });
 
+test("dashboard-experience-refinement.PROJECT_REGISTRATION.1 and .2 create an idempotent active ACAI project record", async () => {
+  const { ensureAcaiProductRegisteredInMd } = await loadVaultReader();
+
+  const registered = ensureAcaiProductRegisteredInMd("", "tef-cli");
+  assert.match(registered, /## 🟢 进行中/);
+  assert.match(registered, /## 🟡 观察中/);
+  assert.match(registered, /## 🔴 已暂停/);
+  assert.match(registered, /### Tef Cli\n- 项目标识：tef-cli\n- ACAI Product：tef-cli\n- 当前里程碑：待补充/);
+  assert.equal(ensureAcaiProductRegisteredInMd(registered, "tef-cli"), registered);
+});
+
+test("dashboard-experience-refinement.BUG_VIEW.1 identifies only the exact bug tag", async () => {
+  const { isBugTodo } = await loadVaultReader();
+
+  assert.equal(isBugTodo({ tags: ["bug"] }), true);
+  assert.equal(isBugTodo({ tags: ["Bug"] }), true);
+  assert.equal(isBugTodo({ tags: ["bugfix"] }), false);
+});
+
 test("project-centered-dashboard.TODO_FORMAT.1 parses project tags separately from ordinary tags", async () => {
   const { parseTodosFromMd, parseProjectTags, formatScopedTodoLine } = await loadVaultReader();
 
