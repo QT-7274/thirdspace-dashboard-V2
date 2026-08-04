@@ -42,3 +42,51 @@ test("work-todo-board.TAG_DISPLAY.3 work overdue section has distinct styling ho
   assert.match(styles, /work-todo-board\.TAG_DISPLAY\.3/);
   assert.match(styles, /\.ts-work-card \.ts-scoped-section--overdue/);
 });
+
+test("project-centered-dashboard.TIME_VIEWS.3 replaces standalone project panels", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+
+  assert.match(source, /renderProjectCenter\(/);
+  assert.match(source, /renderProjectAcai\(/);
+  assert.match(source, /label: "记灵感"/);
+  assert.doesNotMatch(source, /this\.renderAcaiTracker\(right\)/);
+  assert.doesNotMatch(source, /text: "昨日遗留"/);
+  assert.doesNotMatch(source, /text: "WORK TODOS"/);
+  assert.doesNotMatch(source, /text: "PRODUCTS"/);
+});
+
+test("project-centered-dashboard.TODO_FORMAT.3 exposes project selectors in task surfaces", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+  const styles = readFileSync("src/styles.css", "utf8");
+
+  assert.match(source, /ts-project-filter/);
+  assert.match(source, /ts-project-select/);
+  assert.match(source, /updateTodoProject/);
+  assert.match(styles, /\.ts-project-card/);
+  assert.match(styles, /@media \(max-width: 680px\)/);
+});
+
+test("project-centered-dashboard.TODO_FORMAT.5 discovered projects feed todo selectors", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+
+  assert.match(source, /const projectEntries = this\.getProjectEntries\(products, todos, scopedTodos, inspirations\)/);
+  assert.match(source, /this\.renderTodos\(todoCard, todos, projectEntries\)/);
+  assert.match(source, /this\.renderScopedTodos\(scopedCard, upcomingScopedTodos, "upcoming", projectEntries\)/);
+});
+
+test("project-centered-dashboard.PROJECT_CENTER.5 project header exposes aligned accessible toggle", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+  const styles = readFileSync("src/styles.css", "utf8");
+
+  assert.match(source, /toggle\.setAttr\("aria-expanded", String\(expanded\)\)/);
+  assert.match(source, /const summary = toggle\.createSpan\(\{ cls: "ts-project-summary" \}\)/);
+  assert.match(source, /const chevron = toggle\.createSpan\(\{ cls: "ts-project-chevron" \}\)/);
+  assert.match(styles, /\.ts-project-toggle\[aria-expanded="true"\] \.ts-project-chevron/);
+});
+
+test("project-centered-dashboard.TIME_VIEWS.4 overdue card renders in the right column", () => {
+  const source = readFileSync("src/view.ts", "utf8");
+
+  assert.match(source, /const overdueCard = right\.createDiv\(\{ cls: "ts-card ts-overdue-card" \}\)/);
+  assert.doesNotMatch(source, /const overdueCard = left\.createDiv\(\{ cls: "ts-card ts-overdue-card" \}\)/);
+});

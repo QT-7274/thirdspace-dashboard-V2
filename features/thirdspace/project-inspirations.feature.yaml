@@ -1,12 +1,15 @@
 feature:
   name: project-inspirations
   product: thirdspace-dashboard
-  description: 仪表盘提供项目灵感面板，支持速记、按项目折叠查看、状态流转与编辑。
+  description: 项目中心提供项目灵感，支持速记、按项目折叠查看、状态流转与编辑。
 
 components:
   PANEL_RENDER:
     requirements:
-      1: 右栏 QUICK 下方展示「项目灵感 · INSPIRATIONS」卡片。
+      1:
+        requirement: 右栏 QUICK 下方展示「项目灵感 · INSPIRATIONS」卡片。
+        deprecated: true
+        note: 项目灵感已迁移到项目中心卡片，保留同一组交互能力。
       2: 按项目分组展示灵感，项目头可展开或折叠。
       3: 已放弃状态默认隐藏，并提供显示/隐藏切换。
 
