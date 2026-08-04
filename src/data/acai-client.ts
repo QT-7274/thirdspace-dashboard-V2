@@ -152,8 +152,27 @@ export function collectAcaiProductNames(data: AcaiImplementationsData | null): s
 }
 
 // dashboard-experience-refinement.ACAI_SYNC.1
-export async function fetchAllAcaiProducts(baseUrl: string, token: string): Promise<string[]> {
-  const url = `${baseUrl}/api/v1/implementations`;
+export function buildAcaiImplementationsUrl(
+  baseUrl: string,
+  repoUri: string,
+  branchName: string,
+): string {
+  // dashboard-experience-refinement.ACAI_SYNC.1-1
+  const params = new URLSearchParams({
+    repo_uri: repoUri.trim(),
+    branch_name: branchName.trim(),
+  });
+  return `${baseUrl.replace(/\/+$/, "")}/api/v1/implementations?${params.toString()}`;
+}
+
+// dashboard-experience-refinement.ACAI_SYNC.1 dashboard-experience-refinement.ACAI_SYNC.1-1
+export async function fetchAllAcaiProducts(
+  baseUrl: string,
+  token: string,
+  repoUri: string,
+  branchName: string,
+): Promise<string[]> {
+  const url = buildAcaiImplementationsUrl(baseUrl, repoUri, branchName);
   const data = await requestAcaiData<AcaiImplementationsData>(url, token, "implementations");
   return collectAcaiProductNames(data);
 }

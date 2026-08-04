@@ -8,6 +8,8 @@ import "./styles.css";
 export interface ThirdSpaceSettings {
   acaiBaseUrl: string;
   acaiApiToken: string;
+  acaiRepoUri: string;
+  acaiBranchName: string;
   // Comma-separated product names; implementations are auto-discovered
   acaiProducts: string;
   acaiAvailableProducts: string[];
@@ -17,6 +19,8 @@ export interface ThirdSpaceSettings {
 const DEFAULT_SETTINGS: ThirdSpaceSettings = {
   acaiBaseUrl: "http://localhost:4000",
   acaiApiToken: "",
+  acaiRepoUri: "github.com/QT-7274/thirdspace-dashboard-V2",
+  acaiBranchName: "main",
   acaiProducts: "",
   acaiAvailableProducts: [],
 };
@@ -135,6 +139,28 @@ class ThirdSpaceSettingTab extends PluginSettingTab {
           });
       });
 
+    new Setting(containerEl)
+      .setName("ACAI Repo URI")
+      .setDesc("用于发现关联 Product 的精确仓库标识")
+      .addText(text => text
+        .setPlaceholder("github.com/owner/repository")
+        .setValue(this.plugin.settings.acaiRepoUri)
+        .onChange(async value => {
+          this.plugin.settings.acaiRepoUri = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName("ACAI Branch")
+      .setDesc("用于发现关联 Product 的精确分支名")
+      .addText(text => text
+        .setPlaceholder("main")
+        .setValue(this.plugin.settings.acaiBranchName)
+        .onChange(async value => {
+          this.plugin.settings.acaiBranchName = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
     const selectedProducts = new Set(parseProductNames(this.plugin.settings.acaiProducts));
     const availableProducts = Array.from(new Set([
       ...this.plugin.settings.acaiAvailableProducts,
@@ -150,13 +176,19 @@ class ThirdSpaceSettingTab extends PluginSettingTab {
       .addButton(button => {
         button
           .setButtonText("同步项目")
-          .setDisabled(!this.plugin.settings.acaiApiToken.trim())
+          .setDisabled(
+            !this.plugin.settings.acaiApiToken.trim()
+            || !this.plugin.settings.acaiRepoUri.trim()
+            || !this.plugin.settings.acaiBranchName.trim()
+          )
           .onClick(async () => {
             button.setDisabled(true).setButtonText("同步中…");
             try {
               const products = await fetchAllAcaiProducts(
                 this.plugin.settings.acaiBaseUrl.replace(/\/+$/, ""),
                 this.plugin.settings.acaiApiToken.trim(),
+                this.plugin.settings.acaiRepoUri.trim(),
+                this.plugin.settings.acaiBranchName.trim(),
               );
               if (products.length === 0) {
                 new Notice("ACAI 未返回项目，已保留上次同步列表");

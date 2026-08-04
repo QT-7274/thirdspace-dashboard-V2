@@ -6,7 +6,8 @@ feature:
 components:
   ACAI_SYNC:
     requirements:
-      1: 设置页通过 ACAI implementations 接口手动同步 Product，去重排序后缓存最近一次成功结果。
+      1: 设置页使用指定 Repo URI 和 Branch 调用 ACAI implementations 接口手动同步关联 Product，去重排序后缓存最近一次成功结果。
+      1-1: 省略 Product 查询时必须同时发送 repo_uri 和 branch_name，避免 ACAI 返回参数校验错误。
       2: ACAI 同步失败、无 Token 或空结果不会清除已缓存 Product 或已启用 Product，并向用户显示可操作的错误信息。
       3: 用户勾选 ACAI Product 时，插件在保存启用状态前将其幂等登记为正式项目；取消勾选不删除项目主表记录。
 
