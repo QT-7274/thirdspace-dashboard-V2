@@ -1,15 +1,24 @@
 feature:
   name: dashboard-experience-refinement
   product: thirdspace-dashboard
-  description: 改进 ACAI 项目同步、项目 Bug、任务项目归属和截断列表展开体验。
+  description: 改进 ACAI 项目配置、项目 Bug、任务项目归属和截断列表展开体验。
 
 components:
   ACAI_SYNC:
     requirements:
-      1: 设置页使用指定 Repo URI 和 Branch 调用 ACAI implementations 接口手动同步关联 Product，去重排序后缓存最近一次成功结果。
-      1-1: 省略 Product 查询时必须同时发送 repo_uri 和 branch_name，避免 ACAI 返回参数校验错误。
-      2: ACAI 同步失败、无 Token 或空结果不会清除已缓存 Product 或已启用 Product，并向用户显示可操作的错误信息。
-      3: 用户勾选 ACAI Product 时，插件在保存启用状态前将其幂等登记为正式项目；取消勾选不删除项目主表记录。
+      1:
+        requirement: 设置页使用指定 Repo URI 和 Branch 调用 ACAI implementations 接口手动同步关联 Product，去重排序后缓存最近一次成功结果。
+        deprecated: true
+      1-1:
+        requirement: 省略 Product 查询时必须同时发送 repo_uri 和 branch_name，避免 ACAI 返回参数校验错误。
+        deprecated: true
+      2:
+        requirement: ACAI 同步失败、无 Token 或空结果不会清除已缓存 Product 或已启用 Product，并向用户显示可操作的错误信息。
+        deprecated: true
+      3:
+        requirement: 用户勾选 ACAI Product 时，插件在保存启用状态前将其幂等登记为正式项目；取消勾选不删除项目主表记录。
+        deprecated: true
+      4: 设置页通过 Product 名称文本框手动维护看板跟踪范围，不要求配置 Repo URI、Branch 或同步远端 Product 列表。
 
   PROJECT_REGISTRATION:
     requirements:
