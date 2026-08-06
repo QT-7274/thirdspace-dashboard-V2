@@ -20,6 +20,11 @@ components:
         deprecated: true
       4: 设置页通过 Product 名称文本框手动维护看板跟踪范围，不要求配置 Repo URI、Branch 或同步远端 Product 列表。
 
+  ACAI_COMPLETED_BRANCHES:
+    requirements:
+      1: ACAI implementation 仅在存在 ACID 且全部完成时归入已完成分支；未完成、阻塞或没有 ACID 的分支继续直接显示。
+      2: 已完成分支默认收起，并显示已隐藏数量；用户可以在当前面板中展开或再次收起查看。
+
   PROJECT_REGISTRATION:
     requirements:
       1: 缺失 04-项目/product-status.md 时，插件创建包含进行中、观察中、已暂停三个区段的项目主表。
