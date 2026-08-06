@@ -35,3 +35,12 @@ test("getRemainingCount reports hidden items after current batch", async () => {
   assert.equal(getRemainingCount(11, 8), 3);
   assert.equal(getRemainingCount(11, 11), 0);
 });
+
+test("dashboard-experience-refinement.EXPANDABLE_LISTS.1 computes collapsed and expanded counts", async () => {
+  const { getVisibleCount, getRemainingCount } = await loadPaginationUtils();
+
+  assert.equal(getVisibleCount(8, 17, false), 8);
+  assert.equal(getVisibleCount(8, 17, true), 17);
+  assert.equal(getRemainingCount(17, getVisibleCount(8, 17, false)), 9);
+  assert.equal(getRemainingCount(17, getVisibleCount(8, 17, true)), 0);
+});

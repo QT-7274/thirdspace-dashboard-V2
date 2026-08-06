@@ -6,7 +6,7 @@ import "./styles.css";
 export interface ThirdSpaceSettings {
   acaiBaseUrl: string;
   acaiApiToken: string;
-  // Comma-separated product names; implementations are auto-discovered
+  // Comma-separated product names; implementations are auto-discovered for each product
   acaiProducts: string;
 }
 
@@ -50,7 +50,8 @@ export default class ThirdSpaceDashboard extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loaded = await this.loadData() as Partial<ThirdSpaceSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
   }
 
   async saveSettings() {
@@ -120,6 +121,7 @@ class ThirdSpaceSettingTab extends PluginSettingTab {
           });
       });
 
+    // dashboard-experience-refinement.ACAI_SYNC.4
     new Setting(containerEl)
       .setName("Products to Track")
       .setDesc(

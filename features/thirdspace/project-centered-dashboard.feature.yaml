@@ -1,0 +1,46 @@
+feature:
+  name: project-centered-dashboard
+  product: thirdspace-dashboard
+  description: 以项目为中心聚合 Todo、项目灵感和 ACAI，同时保留时间执行视图。
+
+components:
+  PROJECT_REGISTRY:
+    requirements:
+      1: 读取 04-项目/product-status.md 作为项目主表，并解析项目标识、展示名称、状态、里程碑和可选 ACAI Product。
+      2: 没有稳定项目标识的旧项目使用规范化标题作为兼容读取 ID，新建关系只接受小写字母、数字和连字符组成的项目标识。
+      3: 无法匹配项目主表的 Todo、灵感和 ACAI 数据归入未登记项目，不自动改写源文件。
+
+  TODO_FORMAT:
+    requirements:
+      1: Todo 使用单个 #project/<projectId> 标签记录项目归属，项目标签不作为普通标签重复展示。
+      2: 解析多个合法项目标签时使用最后一个，并向界面报告格式异常；无项目标签的 Todo 属于未归属。
+      3: Todo 面板和新建 Todo 弹框提供项目归属选择；当前筛选项目时新建 Todo 默认使用该项目。
+      4: 有 taskId 的 Todo 修改项目归属时先更新任务池，再同步今日工作日志中的同一任务；失败时恢复界面并显示 Notice。
+      5: 项目选择器包含项目主表及项目中心从 Todo、灵感和 ACAI 中发现的合法项目，不自动创建或改写项目主表。
+
+  PROJECT_CENTER:
+    requirements:
+      1: 项目区域按项目主表顺序展示可折叠项目卡片，并在同一时间只展开一个项目。
+      2: 项目卡片摘要显示状态、里程碑、未完成 Todo 数量、未放弃灵感数量和 ACAI 加载状态。
+      3: 展开项目后在同一张卡片中展示 Todo、项目灵感和 ACAI；Todo 与灵感在窄屏下纵向排列。
+      4: 项目展开时才加载对应 ACAI Product；单项目 ACAI 失败不阻塞本地内容和其他项目。
+      5: 项目卡片表头整行可展开或收起，名称、摘要和展开状态图标保持一致对齐，并提供可访问的展开状态。
+      6: 项目中心仅对具有稳定 taskId 的同一任务去重；缺少 taskId 的任务即使内容和日期相同也全部保留。
+
+  TIME_VIEWS:
+    requirements:
+      1: TODAY'S TODOS、逾期任务和 UPCOMING TASKS 保留时间视图，并提供全部项目、未归属和具体项目筛选。
+      2: 时间视图和项目视图引用同一条 Todo，不创建副本。
+      3: 看板不再渲染昨日遗留、项目灵感、WORK TODOS、独立 ACAI 或 PRODUCTS 面板。
+      4: 宽屏双栏布局中逾期任务显示在右栏，窄屏布局按页面顺序显示为单列。
+
+  QUICK_CAPTURE:
+    requirements:
+      1: QUICK 中的搜索入口替换为记灵感，打开现有灵感弹框。
+      2: 当前展开项目存在时，记灵感默认选择该项目；没有展开项目时使用项目主表候选。
+
+constraints:
+  COMPATIBILITY:
+    requirements:
+      1: 首次上线只兼容读取已有 Markdown，不执行批量迁移或历史工作日志改写。
+      2: 原有灵感状态、编辑、删除和 ACAI feature/ACID 状态操作继续可用。

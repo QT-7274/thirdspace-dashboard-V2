@@ -151,6 +151,192 @@ test("work-todo-board.TAG_DISPLAY.2 parseTodosFromMd extracts tags from today's 
   ]);
 });
 
+test("project-centered-dashboard.PROJECT_REGISTRY.1 parses stable ids and optional Acai mapping", async () => {
+  const { parseProducts } = await loadVaultReader();
+
+  assert.deepEqual(parseProducts(`## 🟢 进行中
+
+### ThirdSpace Dashboard
+- 项目标识：thirdspace-dashboard
+- ACAI Product：thirdspace-dashboard
+- 当前里程碑：完成项目中心改版
+`), [{
+    id: "thirdspace-dashboard",
+    name: "ThirdSpace Dashboard",
+    status: "active",
+    milestone: "完成项目中心改版",
+    acaiProduct: "thirdspace-dashboard",
+  }]);
+});
+
+test("dashboard-experience-refinement.PROJECT_REGISTRATION.1 and .2 create an idempotent active ACAI project record", async () => {
+  const { ensureAcaiProductRegisteredInMd } = await loadVaultReader();
+
+  const registered = ensureAcaiProductRegisteredInMd("", "tef-cli");
+  assert.match(registered, /## 🟢 进行中/);
+  assert.match(registered, /## 🟡 观察中/);
+  assert.match(registered, /## 🔴 已暂停/);
+  assert.match(registered, /### Tef Cli\n- 项目标识：tef-cli\n- ACAI Product：tef-cli\n- 当前里程碑：待补充/);
+  assert.equal(ensureAcaiProductRegisteredInMd(registered, "tef-cli"), registered);
+});
+
+test("dashboard-experience-refinement.BUG_VIEW.1 identifies only the exact bug tag", async () => {
+  const { isBugTodo } = await loadVaultReader();
+
+  assert.equal(isBugTodo({ tags: ["bug"] }), true);
+  assert.equal(isBugTodo({ tags: ["Bug"] }), true);
+  assert.equal(isBugTodo({ tags: ["bugfix"] }), false);
+});
+
+test("project-centered-dashboard.TODO_FORMAT.1 parses project tags separately from ordinary tags", async () => {
+  const { parseTodosFromMd, parseProjectTags, formatScopedTodoLine } = await loadVaultReader();
+
+  assert.deepEqual(parseTodosFromMd("## 今日Todo\n- [ ] 项目任务 #project/thirdspace-dashboard #工作 ^ts-1\n"), [
+    {
+      text: "项目任务",
+      done: false,
+      tags: ["工作"],
+      taskId: "ts-1",
+      projectId: "thirdspace-dashboard",
+    },
+  ]);
+  assert.deepEqual(parseProjectTags(["project/old", "project/new", "工作"]), {
+    tags: ["工作"],
+    projectId: "new",
+    projectTagIssue: "duplicate",
+  });
+  assert.match(
+    formatScopedTodoLine({ text: "项目池任务", scope: "week", projectId: "thirdspace-dashboard" }),
+    /#project\/thirdspace-dashboard/,
+  );
+});
+
+test("project-centered-dashboard.TODO_ASSIGNMENT.2 updates project tag by stable task id", async () => {
+  const { setTodoProjectInMd } = await loadVaultReader();
+  const md = "## 今日Todo\n- [ ] 同名任务 #工作 #project/old ^ts-1\n- [ ] 同名任务 #工作 ^ts-2\n";
+
+  assert.equal(
+    setTodoProjectInMd(md, "ts-2", "thirdspace-dashboard"),
+    "## 今日Todo\n- [ ] 同名任务 #工作 #project/old ^ts-1\n- [ ] 同名任务 #工作 #project/thirdspace-dashboard ^ts-2\n",
+  );
+  assert.equal(setTodoProjectInMd(md, "ts-2"), "## 今日Todo\n- [ ] 同名任务 #工作 #project/old ^ts-1\n- [ ] 同名任务 #工作 ^ts-2\n");
+});
+
+test("project-centered-dashboard.TODO_FORMAT.4 syncs project assignment to task pool and today's log", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const pool = { path: "00-系统/tasks.md" };
+  const today = { path: getTodayWorklogPath() };
+  const contents = new Map([
+    [pool.path, "## 本周\n- [ ] 同一任务 #工作 ^ts-sync\n"],
+    [today.path, "## 今日Todo\n- [ ] 同一任务 #工作 ^ts-sync\n"],
+  ]);
+  const writes = new Map();
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === pool.path ? pool : path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async (file, md) => { writes.set(file.path, md); contents.set(file.path, md); },
+    },
+  };
+
+  assert.equal(
+    await updateTodoProject(app, { text: "同一任务", done: false, tags: ["工作"], taskId: "ts-sync" }, "thirdspace-dashboard"),
+    true,
+  );
+  assert.match(writes.get(pool.path), /#project\/thirdspace-dashboard/);
+  assert.match(writes.get(today.path), /#project\/thirdspace-dashboard/);
+});
+
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 updates the unique legacy project match", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const contents = new Map([
+    [today.path, [
+      "## 今日Todo",
+      "- [ ] 重复任务 #工作 #project/alpha",
+      "- [ ] 重复任务 #工作 #project/beta",
+    ].join("\n")],
+  ]);
+  const writes = new Map();
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async (file, md) => { writes.set(file.path, md); contents.set(file.path, md); },
+    },
+  };
+
+  assert.equal(
+    await updateTodoProject(app, {
+      text: "重复任务",
+      done: false,
+      tags: ["工作"],
+      projectId: "beta",
+    }, "gamma"),
+    true,
+  );
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/alpha/);
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/gamma/);
+});
+
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 rejects ambiguous legacy project matches without modifying markdown", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const original = [
+    "## 今日Todo",
+    "- [ ] 无法区分的任务 #工作",
+    "- [ ] 无法区分的任务 #工作",
+  ].join("\n");
+  const contents = new Map([[today.path, original]]);
+  let modifyCalls = 0;
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async () => { modifyCalls += 1; },
+    },
+  };
+
+  await assert.rejects(
+    updateTodoProject(app, { text: "无法区分的任务", done: false, tags: ["工作"] }, "gamma"),
+    /multiple matching legacy todos/i,
+  );
+  assert.equal(modifyCalls, 0);
+  assert.equal(contents.get(today.path), original);
+});
+
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 ignores stable-id todos during legacy matching", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const contents = new Map([
+    [today.path, [
+      "## 今日Todo",
+      "- [ ] 重复任务 #工作 #project/beta",
+      "- [ ] 重复任务 #工作 #project/beta ^ts-stable-1",
+    ].join("\n")],
+  ]);
+  const writes = new Map();
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async (file, md) => { writes.set(file.path, md); contents.set(file.path, md); },
+    },
+  };
+
+  assert.equal(
+    await updateTodoProject(app, {
+      text: "重复任务",
+      done: false,
+      tags: ["工作"],
+      projectId: "beta",
+    }, "gamma"),
+    true,
+  );
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/gamma$/m);
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/beta \^ts-stable-1/);
+});
+
 test("setTaskPoolTodoDoneInMd updates the linked source task by id", async () => {
   const { setTaskPoolTodoDoneInMd } = await loadVaultReader();
   const md = "## 本周\n- [ ] 注册 linkin #学习 #task/scope-week ^ts-week-1\n";

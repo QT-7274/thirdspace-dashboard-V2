@@ -30,10 +30,11 @@ function fileModified(app: App, f: TFile): number {
 export interface WorkspaceEntry  { dir: string; skill: string; desc: string; }
 export interface WorkspaceStats  { dir: string; icon: string; desc: string; fileCount: number; lastModified: number; }
 export interface DailyActivity   { date: string; count: number; }
-export interface TodoItem        { text: string; done: boolean; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; }
+export interface ProjectItem      { id: string; name: string; status: string; milestone: string; acaiProduct?: string; }
+export interface TodoItem        { text: string; done: boolean; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; projectId?: string; projectTagIssue?: "invalid" | "duplicate"; }
 export type TaskScope            = "today" | "week" | "month" | "longterm" | "custom";
-export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; taskId?: string; }
-export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; }
+export interface ScopedTodoInput { text: string; scope: TaskScope; tags?: string[]; dueDate?: string; taskId?: string; projectId?: string; }
+export interface ScopedTodoItem  { text: string; done: boolean; scope: Exclude<TaskScope, "today">; tags: string[]; dueDate?: string; periodRange?: string; taskId?: string; projectId?: string; projectTagIssue?: "invalid" | "duplicate"; }
 export interface VaultStats      { total: number; thisWeek: number; thisMonth: number; activeDays: number; }
 export interface WorklogEntry    { time: string; title: string; }
 export interface TodayWorklog    { highlights: string[]; entries: WorklogEntry[]; }
@@ -63,6 +64,7 @@ const DEFAULT_WORKSPACES = [
 ];
 const WEEKDAYS = ["日","一","二","三","四","五","六"];
 const TASK_POOL_PATH = "00-系统/tasks.md";
+export const PRODUCT_STATUS_PATH = "04-项目/product-status.md";
 const TASK_SCOPE_LABELS: Record<Exclude<TaskScope, "today">, string> = {
   week: "本周",
   month: "本月",
@@ -168,14 +170,33 @@ export function getRecentFiles(app: App, days = 7) {
 // ── Products ─────────────────────────────────────────────────
 export async function loadProductStatus(app: App): Promise<string | null> {
   try {
-    const f = app.vault.getAbstractFileByPath("04-项目/product-status.md") as TFile|null;
+    const f = app.vault.getAbstractFileByPath(PRODUCT_STATUS_PATH) as TFile|null;
     if (f) return await app.vault.read(f);
   } catch {}
   return null;
 }
 
-export function parseProducts(md: string): Array<{name:string; status:string; milestone:string}> {
-  const results: Array<{name:string;status:string;milestone:string}> = [];
+export function normalizeProjectId(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  if (normalized) return normalized;
+
+  let hash = 0;
+  for (const char of value.trim()) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  return `project-${hash.toString(36)}`;
+}
+
+export function isValidProjectId(value: string): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
+// project-centered-dashboard.PROJECT_REGISTRY.1 project-centered-dashboard.PROJECT_REGISTRY.2
+export function parseProducts(md: string): ProjectItem[] {
+  const results: ProjectItem[] = [];
   let currentStatus = "unknown";
   for (const line of md.split("\n")) {
     if (line.startsWith("## ")) {
@@ -183,13 +204,106 @@ export function parseProducts(md: string): Array<{name:string; status:string; mi
       else if (line.includes("🟡")) currentStatus = "watch";
       else if (line.includes("🔴") || line.includes("搁置") || line.includes("放弃")) currentStatus = "paused";
     }
-    if (line.startsWith("### ")) results.push({ name: line.replace("### ","").trim(), status: currentStatus, milestone:"" });
-    if (line.includes("当前里程碑") && results.length > 0) {
-      const last = results[results.length-1];
-      if (!last.milestone) last.milestone = line.replace(/.*：\s*/,"").trim().slice(0,45);
+    if (line.startsWith("### ")) {
+      const name = line.replace("### ", "").trim();
+      results.push({ name, id: normalizeProjectId(name), status: currentStatus, milestone: "" });
+    }
+    if (results.length > 0) {
+      const last = results[results.length - 1];
+      const projectId = line.match(/(?:项目标识|Project ID)\s*[:：]\s*([a-z0-9-]+)/i)?.[1];
+      const acaiProduct = line.match(/(?:ACAI Product|Acai Product)\s*[:：]\s*(.+)$/i)?.[1]?.trim();
+      if (projectId && isValidProjectId(projectId)) last.id = projectId;
+      if (acaiProduct) last.acaiProduct = acaiProduct;
+      if (line.includes("当前里程碑") && !last.milestone) {
+        last.milestone = line.replace(/.*：\s*/, "").trim().slice(0, 90);
+      }
     }
   }
-  return results.filter(p => p.status !== "unknown").slice(0, 6);
+  return results.filter(p => p.status !== "unknown").slice(0, 50);
+}
+
+export const parseProjects = parseProducts;
+
+export function formatProjectDisplayName(product: string): string {
+  return product
+    .split("-")
+    .filter(Boolean)
+    .map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function buildProductStatusTemplate(): string {
+  return "# 项目状态\n\n## 🟢 进行中\n\n## 🟡 观察中\n\n## 🔴 已暂停\n";
+}
+
+// dashboard-experience-refinement.PROJECT_REGISTRATION.1 dashboard-experience-refinement.PROJECT_REGISTRATION.2
+export function ensureAcaiProductRegisteredInMd(md: string, product: string): string {
+  const trimmedProduct = product.trim();
+  if (!trimmedProduct) return md;
+
+  const projectId = normalizeProjectId(trimmedProduct);
+  const alreadyRegistered = parseProducts(md).some(project =>
+    project.id === projectId || project.acaiProduct === trimmedProduct,
+  ) || md.split("\n").some(line => {
+    const value = line.match(/(?:项目标识|Project ID|ACAI Product|Acai Product)\s*[:：]\s*(.+)$/i)?.[1]?.trim();
+    return value === projectId || value === trimmedProduct;
+  });
+  if (alreadyRegistered) return md;
+
+  const source = md.trim() ? md : buildProductStatusTemplate();
+  const lines = source.replace(/\n+$/, "").split("\n");
+  let activeIndex = lines.findIndex(line => /^##\s+.*🟢/.test(line));
+  if (activeIndex < 0) {
+    lines.push("", "## 🟢 进行中", "");
+    activeIndex = lines.length - 2;
+  }
+
+  let insertAt = activeIndex + 1;
+  while (insertAt < lines.length && lines[insertAt].trim() === "") insertAt++;
+  lines.splice(insertAt, 0,
+    `### ${formatProjectDisplayName(trimmedProduct)}`,
+    `- 项目标识：${projectId}`,
+    `- ACAI Product：${trimmedProduct}`,
+    "- 当前里程碑：待补充",
+    "",
+  );
+  return `${lines.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+// dashboard-experience-refinement.ACAI_SYNC.3
+export async function registerAcaiProduct(app: App, product: string): Promise<ProjectItem> {
+  const existing = app.vault.getAbstractFileByPath(PRODUCT_STATUS_PATH) as TFile | null;
+  let next: string;
+  if (existing) {
+    const current = await app.vault.read(existing);
+    next = ensureAcaiProductRegisteredInMd(current, product);
+    if (next !== current) await app.vault.modify(existing, next);
+  } else {
+    if (!app.vault.getAbstractFileByPath("04-项目")) await app.vault.createFolder("04-项目");
+    next = ensureAcaiProductRegisteredInMd("", product);
+    await app.vault.create(PRODUCT_STATUS_PATH, next);
+  }
+
+  const projectId = normalizeProjectId(product);
+  return parseProducts(next).find(project => project.id === projectId || project.acaiProduct === product) ?? {
+    id: projectId,
+    name: formatProjectDisplayName(product),
+    status: "active",
+    milestone: "待补充",
+    acaiProduct: product,
+  };
+}
+
+export function resolveProjectIdForName(name: string, projects: ProjectItem[]): string | undefined {
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+  const normalized = normalizeProjectId(trimmed);
+  return projects.find(project =>
+    project.id === trimmed
+      || project.name === trimmed
+      || project.acaiProduct === trimmed
+      || normalizeProjectId(project.name) === normalized,
+  )?.id;
 }
 
 // ── Todos (from today's worklog ## 今日Todo) ─────────────────
@@ -235,9 +349,48 @@ function uniqueTags(tags: string[] = []): string[] {
   return result;
 }
 
+export type ParsedProjectTags = {
+  tags: string[];
+  projectId?: string;
+  projectTagIssue?: "invalid" | "duplicate";
+};
+
+export function parseProjectTags(tags: string[]): ParsedProjectTags {
+  const projectIds: string[] = [];
+  let invalid = false;
+  const regularTags: string[] = [];
+
+  for (const raw of tags) {
+    const tag = normalizeTag(raw);
+    if (!tag) continue;
+    if (!tag.startsWith("project/")) {
+      regularTags.push(tag);
+      continue;
+    }
+
+    const projectId = tag.slice("project/".length);
+    if (isValidProjectId(projectId)) projectIds.push(projectId);
+    else invalid = true;
+  }
+
+  const projectId = projectIds[projectIds.length - 1];
+  return {
+    tags: uniqueTags(regularTags),
+    ...(projectId ? { projectId } : {}),
+    ...((invalid || projectIds.length > 1)
+      ? { projectTagIssue: invalid ? "invalid" : "duplicate" }
+      : {}),
+  };
+}
+
 export function isWorkTodo(item: { tags?: string[] }): boolean {
   // work-todo-board.COMPATIBILITY.1
   return uniqueTags(item.tags).includes(WORK_TODO_TAG);
+}
+
+// dashboard-experience-refinement.BUG_VIEW.1
+export function isBugTodo(item: { tags?: string[] }): boolean {
+  return uniqueTags(item.tags).some(tag => tag.toLowerCase() === "bug");
 }
 
 function isValidDueDate(dueDate: string | undefined): dueDate is string {
@@ -260,9 +413,8 @@ function parseTodoBody(body: string): Omit<TodoItem, "done"> {
   const taskId = parseTaskId(body);
   const dueDate = body.match(/📅\s*(\d{4}-\d{2}-\d{2})/)?.[1];
   const periodRange = body.match(/📆\s*(\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2})/)?.[1];
-  const tags = Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g))
-    .map(match => match[1])
-    .filter(tag => !tag.startsWith("task/scope-"));
+  const parsedTags = parseProjectTags(Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g)).map(match => match[1]));
+  const tags = parsedTags.tags.filter(tag => !tag.startsWith("task/scope-"));
   const text = body
     .replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "")
     .replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "")
@@ -278,6 +430,8 @@ function parseTodoBody(body: string): Omit<TodoItem, "done"> {
     ...(periodRange ? { periodRange } : {}),
     ...(dueDate ? { dueDate } : {}),
     ...(taskId ? { taskId } : {}),
+    ...(parsedTags.projectId ? { projectId: parsedTags.projectId } : {}),
+    ...(parsedTags.projectTagIssue ? { projectTagIssue: parsedTags.projectTagIssue } : {}),
   };
 }
 
@@ -291,6 +445,19 @@ function todoMatchesItem(parsed: Omit<TodoItem, "done">, item: TodoItem): boolea
   if ((parsed.periodRange ?? "") !== (item.periodRange ?? "")) return false;
   if (parsed.tags.length !== item.tags.length) return false;
   return parsed.tags.every(t => item.tags.includes(t));
+}
+
+function legacyTodoProjectMatchesItem(
+  parsed: Omit<TodoItem, "done">,
+  item: TodoItem | ScopedTodoItem,
+): boolean {
+  if (parsed.taskId) return false;
+  if (parsed.text !== item.text) return false;
+  if ((parsed.dueDate ?? "") !== (item.dueDate ?? "")) return false;
+  if ((parsed.periodRange ?? "") !== (item.periodRange ?? "")) return false;
+  if (parsed.tags.length !== item.tags.length) return false;
+  if (!parsed.tags.every(t => item.tags.includes(t))) return false;
+  return parsed.projectId === item.projectId;
 }
 
 // ── Overdue detection ────────────────────────────────────────
@@ -369,23 +536,26 @@ export function getScopeDateRange(scope: TaskScope, baseDate = new Date()): stri
   return undefined;
 }
 
-function formatTodayTodoText(input: { text: string; tags?: string[]; dueDate?: string; periodRange?: string; taskId?: string }): string {
-  const tags = uniqueTags(input.tags);
+function formatTodayTodoText(input: { text: string; tags?: string[]; dueDate?: string; periodRange?: string; taskId?: string; projectId?: string }): string {
+  const tags = uniqueTags(input.tags).filter(tag => !tag.startsWith("project/"));
+  const projectTag = input.projectId && isValidProjectId(input.projectId) ? ` #project/${input.projectId}` : "";
   const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
   const dateText = isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
   const rangeText = "periodRange" in input && input.periodRange ? ` 📆 ${input.periodRange}` : "";
   const idText = input.taskId ? ` ^${input.taskId}` : "";
-  return `${input.text.trim()}${tagText}${rangeText}${dateText}${idText}`;
+  return `${input.text.trim()}${projectTag}${tagText}${rangeText}${dateText}${idText}`;
 }
 
 export function formatScopedTodoLine(input: ScopedTodoInput, baseDate = new Date()): string {
-  const tags = uniqueTags([...(input.tags ?? []), `task/scope-${input.scope}`]);
+  // project-centered-dashboard.TODO_FORMAT.1
+  const tags = uniqueTags([...(input.tags ?? []), `task/scope-${input.scope}`]).filter(tag => !tag.startsWith("project/"));
+  const projectTag = input.projectId && isValidProjectId(input.projectId) ? ` #project/${input.projectId}` : "";
   const tagText = tags.length ? ` ${tags.map(tag => `#${tag}`).join(" ")}` : "";
   const periodRange = getScopeDateRange(input.scope, baseDate);
   const rangeText = periodRange ? ` 📆 ${periodRange}` : "";
   const dateText = input.scope === "custom" && isValidDueDate(input.dueDate) ? ` 📅 ${input.dueDate}` : "";
   const idText = input.taskId ? ` ^${input.taskId}` : "";
-  return `- [ ] ${input.text.trim()}${tagText}${rangeText}${dateText}${idText}`;
+  return `- [ ] ${input.text.trim()}${projectTag}${tagText}${rangeText}${dateText}${idText}`;
 }
 
 export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
@@ -405,31 +575,8 @@ export function parseScopedTodosFromMd(md: string): ScopedTodoItem[] {
     const done = checkbox[1] === "x";
     if (done) continue;
 
-    const body = checkbox[2];
-    const taskId = parseTaskId(body);
-    const dueDate = body.match(/📅\s*(\d{4}-\d{2}-\d{2})/)?.[1];
-    const periodRange = body.match(/📆\s*(\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2})/)?.[1];
-    const tags = Array.from(body.matchAll(/(?:^|\s)#([^\s#]+)/g))
-      .map(match => match[1])
-      .filter(tag => !tag.startsWith("task/scope-"));
-    const text = body
-      .replace(/✅\s*\d{4}-\d{2}-\d{2}/g, "")
-      .replace(/📅\s*\d{4}-\d{2}-\d{2}/g, "")
-      .replace(/📆\s*\d{4}-\d{2}-\d{2}\s+到\s+\d{4}-\d{2}-\d{2}/g, "")
-      .replace(/(?:^|\s)#[^\s#]+/g, " ")
-      .replace(/(?:^|\s)\^ts-[A-Za-z0-9_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (text) items.push({
-      text,
-      done,
-      scope,
-      tags: uniqueTags(tags),
-      ...(periodRange ? { periodRange } : {}),
-      ...(dueDate ? { dueDate } : {}),
-      ...(taskId ? { taskId } : {}),
-    });
+    const parsed = parseTodoBody(checkbox[2]);
+    if (parsed.text) items.push({ ...parsed, done, scope });
   }
 
   return items;
@@ -555,7 +702,8 @@ export async function addScopedTodo(app: App, input: ScopedTodoInput): Promise<v
   if (!text) return;
 
   if (input.scope === "today") {
-    await addTodoToWorklog(app, formatTodayTodoText({ ...input, text }));
+    const taskId = input.taskId ?? createTaskId();
+    await addTodoToWorklog(app, formatTodayTodoText({ ...input, text, taskId }));
     return;
   }
 
@@ -602,6 +750,91 @@ export async function addTodoToWorklog(app: App, text: string): Promise<void> {
     lines.push("", "## 今日Todo", "", newItem, "");
   }
   await app.vault.modify(f, lines.join("\n"));
+}
+
+function replaceProjectTagsInTodoLine(line: string, projectId?: string): string {
+  const match = line.match(/^(- \[[ x]\]\s+)(.+)$/);
+  if (!match) return line;
+
+  const body = match[2]
+    .replace(/(?:^|\s)#project\/[^\s#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const projectTag = projectId && isValidProjectId(projectId) ? ` #project/${projectId}` : "";
+  const taskIdMatch = body.match(/\s+\^ts-[A-Za-z0-9_-]+(?:\s+✅\s+\d{4}-\d{2}-\d{2})?$/);
+  if (!taskIdMatch) return `${match[1]}${body}${projectTag}`;
+
+  const taskSuffix = taskIdMatch[0];
+  return `${match[1]}${body.slice(0, -taskSuffix.length).trimEnd()}${projectTag}${taskSuffix}`;
+}
+
+export function setTodoProjectInMd(md: string, taskId: string, projectId?: string): string {
+  if (!taskId) return md;
+  const lines = md.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!new RegExp(`(?:^|\\s)\\^${taskId}(?:\\s|$)`).test(lines[i])) continue;
+    lines[i] = replaceProjectTagsInTodoLine(lines[i], projectId);
+    break;
+  }
+  return lines.join("\n");
+}
+
+function setTodoProjectForItemInMd(md: string, item: TodoItem | ScopedTodoItem, projectId?: string): string {
+  const lines = md.split("\n");
+  const matchingLineIndexes: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^- \[( |x)\]\s+(.+)/);
+    if (!match) continue;
+    const parsed = parseTodoBody(match[2]);
+    if (legacyTodoProjectMatchesItem(parsed, item)) matchingLineIndexes.push(i);
+  }
+
+  // dashboard-experience-refinement.PROJECT_ASSIGNMENT.2
+  if (matchingLineIndexes.length > 1) throw new Error("Multiple matching legacy todos");
+  if (matchingLineIndexes.length === 1) {
+    const lineIndex = matchingLineIndexes[0];
+    lines[lineIndex] = replaceProjectTagsInTodoLine(lines[lineIndex], projectId);
+  }
+
+  return lines.join("\n");
+}
+
+export async function updateTodoProject(
+  app: App,
+  item: TodoItem | ScopedTodoItem,
+  projectId?: string,
+): Promise<boolean> {
+  // project-centered-dashboard.TODO_FORMAT.4
+  const normalized = projectId?.trim() || undefined;
+  if (normalized && !isValidProjectId(normalized)) {
+    throw new Error(`Invalid project id: ${normalized}`);
+  }
+
+  let changed = false;
+  const taskPool = app.vault.getAbstractFileByPath(TASK_POOL_PATH) as TFile | null;
+  if (item.taskId && taskPool) {
+    const md = await app.vault.read(taskPool);
+    const next = setTodoProjectInMd(md, item.taskId, normalized);
+    if (next !== md) {
+      await app.vault.modify(taskPool, next);
+      changed = true;
+    }
+  }
+
+  const worklog = app.vault.getAbstractFileByPath(getTodayWorklogPath()) as TFile | null;
+  if (worklog) {
+    const md = await app.vault.read(worklog);
+    const next = item.taskId
+      ? setTodoProjectInMd(md, item.taskId, normalized)
+      : setTodoProjectForItemInMd(md, item, normalized);
+    if (next !== md) {
+      await app.vault.modify(worklog, next);
+      changed = true;
+    }
+  }
+
+  return changed;
 }
 
 export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean, doneDate: string): string {

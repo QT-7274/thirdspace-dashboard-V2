@@ -1,0 +1,41 @@
+feature:
+  name: dashboard-experience-refinement
+  product: thirdspace-dashboard
+  description: 改进 ACAI 项目配置、项目 Bug、任务项目归属和截断列表展开体验。
+
+components:
+  ACAI_SYNC:
+    requirements:
+      1:
+        requirement: 设置页使用指定 Repo URI 和 Branch 调用 ACAI implementations 接口手动同步关联 Product，去重排序后缓存最近一次成功结果。
+        deprecated: true
+      1-1:
+        requirement: 省略 Product 查询时必须同时发送 repo_uri 和 branch_name，避免 ACAI 返回参数校验错误。
+        deprecated: true
+      2:
+        requirement: ACAI 同步失败、无 Token 或空结果不会清除已缓存 Product 或已启用 Product，并向用户显示可操作的错误信息。
+        deprecated: true
+      3:
+        requirement: 用户勾选 ACAI Product 时，插件在保存启用状态前将其幂等登记为正式项目；取消勾选不删除项目主表记录。
+        deprecated: true
+      4: 设置页通过 Product 名称文本框手动维护看板跟踪范围，不要求配置 Repo URI、Branch 或同步远端 Product 列表。
+
+  PROJECT_REGISTRATION:
+    requirements:
+      1: 缺失 04-项目/product-status.md 时，插件创建包含进行中、观察中、已暂停三个区段的项目主表。
+      2: 新登记项目写入进行中区段，使用由 Product slug 推导的展示名称、Product 作为项目标识和 ACAI Product、待补充作为里程碑。
+
+  BUG_VIEW:
+    requirements:
+      1: Todo 的精确标准化 bug 标签表示 Bug，项目卡片中的 Bug 不与普通 TODO 重复显示。
+      2: 项目摘要显示未完成 Bug 数，展开卡片显示 TODO、BUG、INSPIRATIONS 三栏，记录 Bug 操作预填当前项目和 bug 标签。
+
+  PROJECT_ASSIGNMENT:
+    requirements:
+      1: 已归属 Todo 显示可编辑项目 Chip；未归属 Todo 只在悬停或键盘焦点时显示项目分配触发器。
+      2: 没有 taskId 的 Todo 修改项目归属时，只有唯一匹配的源任务才允许写入；多个 legacy 候选时保持源文件不变并报告失败。
+
+  EXPANDABLE_LISTS:
+    requirements:
+      1: 今日、逾期、Upcoming 分组、项目 TODO、项目 BUG 和项目灵感在有隐藏项时均提供展开全部和收起。
+      2: 展开状态按视图、项目、分组和项目筛选独立保存；筛选或任务数据刷新后重置受影响列表。
