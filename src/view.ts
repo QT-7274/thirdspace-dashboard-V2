@@ -272,6 +272,7 @@ class InspirationModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
+    this.modalEl.addClass("ts-insp-modal");
     contentEl.addClass("ts-modal");
     contentEl.createEl("h3", { text: "记灵感 · Capture Idea", cls: "ts-modal-title" });
 
@@ -316,7 +317,8 @@ class InspirationModal extends Modal {
       });
     }
 
-    const input = contentEl.createEl("textarea", { cls: "ts-modal-textarea" });
+    const textWrap = contentEl.createDiv({ cls: "ts-modal-text-wrap" });
+    const input = textWrap.createEl("textarea", { cls: "ts-modal-textarea" });
     input.placeholder = "写下你的灵感…";
     input.rows = 4;
     input.focus();
@@ -1243,8 +1245,10 @@ export class DashboardView extends ItemView {
     const isExpanded = this.inspirationExpandedProjects.has(group.project);
     const section = parent.createDiv({ cls: "ts-insp-project" });
 
-    const head = section.createDiv({ cls: "ts-insp-project-head" });
-    head.createSpan({ cls: "ts-insp-chevron", text: isExpanded ? "▾" : "▸" });
+    const head = section.createDiv({
+      cls: `ts-insp-project-head${isExpanded ? " is-expanded" : ""}`,
+    });
+    head.createSpan({ cls: "ts-insp-chevron", attr: { "aria-hidden": "true" } });
     head.createSpan({ cls: "ts-insp-project-name", text: group.project });
     head.createSpan({ cls: "ts-insp-project-meta", text: `${group.items.length} 条` });
     head.addEventListener("click", async () => {
