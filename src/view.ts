@@ -410,6 +410,7 @@ export class DashboardView extends ItemView {
   private acaiTrackerRequestsByKey = new Map<string, Promise<AcaiTrackerState>>();
   private acaiTrackerBackoffUntilByKey = new Map<string, number>();
   private acaiExpandedKeys = new Set<string>();
+  private acaiCompletedDisclosureKeys = new Set<string>();
   private acaiContextCache = new Map<string, { data: AcaiFeatureContext; fetchedAt: number }>();
   private acaiContextRequests = new Map<string, Promise<AcaiFeatureContext>>();
   private acaiStatusWrites = new Set<string>();
@@ -1540,13 +1541,13 @@ export class DashboardView extends ItemView {
 
       // dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.2
       if (completed.length > 0) {
-        const disclosureKey = `${product}::__completed-implementations__`;
+        // dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.3
         const disclosure = trackerCard.createEl("details", { cls: "ts-acai-completed-impls" });
-        disclosure.open = this.acaiExpandedKeys.has(disclosureKey);
+        disclosure.open = this.acaiCompletedDisclosureKeys.has(product);
         const disclosureSummary = disclosure.createEl("summary", { cls: "ts-acai-completed-summary" });
         const updateSummary = () => {
-          if (disclosure.open) this.acaiExpandedKeys.add(disclosureKey);
-          else this.acaiExpandedKeys.delete(disclosureKey);
+          if (disclosure.open) this.acaiCompletedDisclosureKeys.add(product);
+          else this.acaiCompletedDisclosureKeys.delete(product);
           disclosureSummary.setText(disclosure.open
             ? `收起 ${completed.length} 个已完成分支`
             : `已隐藏 ${completed.length} 个已完成分支`);
@@ -1812,6 +1813,7 @@ export class DashboardView extends ItemView {
     this.acaiContextCache.clear();
     this.acaiContextRequests.clear();
     this.acaiExpandedKeys.clear();
+    this.acaiCompletedDisclosureKeys.clear();
   }
 
   private refreshAcaiTrackerSection() {

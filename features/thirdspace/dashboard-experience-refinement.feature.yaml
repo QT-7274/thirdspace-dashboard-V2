@@ -24,6 +24,7 @@ components:
     requirements:
       1: ACAI implementation 仅在存在 ACID 且全部完成时归入已完成分支；未完成、阻塞或没有 ACID 的分支继续直接显示。
       2: 已完成分支默认收起，并显示已隐藏数量；用户可以在当前面板中展开或再次收起查看。
+      3: 已完成分支折叠状态与 Feature 展开状态必须独立保存，任意 Product、Implementation 或 Feature 名称不能造成状态串扰。
 
   PROJECT_REGISTRATION:
     requirements:

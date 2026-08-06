@@ -46,6 +46,17 @@ test("dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.2 renders complete
 
   assert.match(viewSource, /createEl\("details", \{ cls: "ts-acai-completed-impls" \}\)/);
   assert.match(viewSource, /已隐藏.*已完成分支/);
-  assert.match(viewSource, /disclosure\.open = this\.acaiExpandedKeys\.has\(disclosureKey\)/);
+  assert.match(viewSource, /disclosure\.open = this\.acaiCompletedDisclosureKeys\.has\(product\)/);
   assert.match(viewSource, /renderAcaiImplementationSection/);
+});
+
+test("dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.3 isolates disclosure and feature expansion state", () => {
+  const viewSource = readFileSync("src/view.ts", "utf8");
+
+  assert.match(viewSource, /private acaiExpandedKeys = new Set<string>\(\);/);
+  assert.match(viewSource, /private acaiCompletedDisclosureKeys = new Set<string>\(\);/);
+  assert.match(viewSource, /this\.acaiCompletedDisclosureKeys\.add\(product\)/);
+  assert.match(viewSource, /this\.acaiCompletedDisclosureKeys\.delete\(product\)/);
+  assert.match(viewSource, /this\.acaiCompletedDisclosureKeys\.clear\(\);/);
+  assert.doesNotMatch(viewSource, /completed-implementations/);
 });
