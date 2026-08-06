@@ -972,6 +972,40 @@ body.theme-dark .ts-modal-btn   { background: var(--surface); color: var(--ink-2
 .ts-acai-impl-section {
   margin-top: 8px;
 }
+.ts-acai-completed-impls {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.ts-acai-completed-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted);
+  user-select: none;
+}
+.ts-acai-completed-summary::-webkit-details-marker {
+  display: none;
+}
+.ts-acai-completed-summary::before {
+  content: "▸";
+  width: 10px;
+  color: #3d7a3d;
+}
+.ts-acai-completed-impls[open] > .ts-acai-completed-summary::before {
+  content: "▾";
+}
+.ts-acai-completed-summary:hover {
+  color: var(--ink-2);
+}
+.ts-acai-completed-list {
+  margin-top: 4px;
+}
 .ts-acai-impl-head {
   display: flex;
   align-items: center;

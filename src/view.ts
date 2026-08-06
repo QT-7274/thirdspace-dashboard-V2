@@ -22,6 +22,7 @@ import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-hea
 import { shouldSubmitOnEnter } from "./utils/keyboard";
 import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getRemainingCount, getVisibleCount } from "./utils/pagination";
 import { deduplicateProjectTodos } from "./utils/project-todos";
+import { partitionAcaiImplementations } from "./utils/acai-implementations";
 import {
   fetchImplementationFeatures, fetchImplementations, fetchFeatureContext, patchFeatureStates,
   ACAI_STATE_OPTIONS,
@@ -409,6 +410,7 @@ export class DashboardView extends ItemView {
   private acaiTrackerRequestsByKey = new Map<string, Promise<AcaiTrackerState>>();
   private acaiTrackerBackoffUntilByKey = new Map<string, number>();
   private acaiExpandedKeys = new Set<string>();
+  private acaiCompletedDisclosureKeys = new Set<string>();
   private acaiContextCache = new Map<string, { data: AcaiFeatureContext; fetchedAt: number }>();
   private acaiContextRequests = new Map<string, Promise<AcaiFeatureContext>>();
   private acaiStatusWrites = new Set<string>();
@@ -1509,7 +1511,9 @@ export class DashboardView extends ItemView {
     token: string,
   ) {
     for (const { product, implFeatures } of productData) {
-      const validImpls = implFeatures.filter(({ features }) => features && features.features.length > 0);
+      // dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.1
+      const { current, completed } = partitionAcaiImplementations(implFeatures);
+      const validImpls = [...current, ...completed];
       if (validImpls.length === 0) continue;
 
       const trackerCard = parent.createDiv({ cls: "ts-card ts-acai-card" });
@@ -1531,31 +1535,65 @@ export class DashboardView extends ItemView {
       const overallBar = trackerCard.createDiv({ cls: "ts-acai-bar" });
       overallBar.createDiv({ cls: `ts-acai-fill ts-acai-fill--${pctClass(overallPct)}`, attr: { style: `width:${overallPct}%` } });
 
-      for (const { impl, features } of validImpls) {
-        const implSection = trackerCard.createDiv({ cls: "ts-acai-impl-section" });
-        const implHead = implSection.createDiv({ cls: "ts-acai-impl-head" });
+      for (const item of current) {
+        this.renderAcaiImplementationSection(trackerCard, product, item, baseUrl, token);
+      }
 
-        const implIndicator = implHead.createSpan({ cls: "ts-acai-impl-indicator" });
-        const implPct = features!.features.reduce((s, f) => s + f.total_count, 0) > 0
-          ? Math.round(features!.features.reduce((s, f) => s + f.completed_count, 0) / features!.features.reduce((s, f) => s + f.total_count, 0) * 100)
-          : 0;
-        implIndicator.setText(impl.implementation_name);
-        implIndicator.addClass(`ts-acai-impl-indicator--${pctClass(implPct)}`);
+      // dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.2
+      if (completed.length > 0) {
+        // dashboard-experience-refinement.ACAI_COMPLETED_BRANCHES.3
+        const disclosure = trackerCard.createEl("details", { cls: "ts-acai-completed-impls" });
+        disclosure.open = this.acaiCompletedDisclosureKeys.has(product);
+        const disclosureSummary = disclosure.createEl("summary", { cls: "ts-acai-completed-summary" });
+        const updateSummary = () => {
+          if (disclosure.open) this.acaiCompletedDisclosureKeys.add(product);
+          else this.acaiCompletedDisclosureKeys.delete(product);
+          disclosureSummary.setText(disclosure.open
+            ? `收起 ${completed.length} 个已完成分支`
+            : `已隐藏 ${completed.length} 个已完成分支`);
+        };
+        disclosure.addEventListener("toggle", updateSummary);
+        updateSummary();
 
-        implHead.createSpan({ cls: "ts-acai-impl-pct", text: `${implPct}%` });
-
-        const featureList = implSection.createDiv({ cls: "ts-acai-list" });
-        for (const feat of features!.features) {
-          this.renderAcaiFeatureRow(featureList, {
-            product,
-            implementation: impl.implementation_name,
-            feature: feat.feature_name,
-            entry: feat,
-            baseUrl,
-            token,
-          });
+        const completedList = disclosure.createDiv({ cls: "ts-acai-completed-list" });
+        for (const item of completed) {
+          this.renderAcaiImplementationSection(completedList, product, item, baseUrl, token);
         }
       }
+    }
+  }
+
+  private renderAcaiImplementationSection(
+    parent: HTMLElement,
+    product: string,
+    item: AcaiProductData["implFeatures"][number],
+    baseUrl: string,
+    token: string,
+  ) {
+    const { impl, features } = item;
+    if (!features) return;
+
+    const implSection = parent.createDiv({ cls: "ts-acai-impl-section" });
+    const implHead = implSection.createDiv({ cls: "ts-acai-impl-head" });
+    const totalAcids = features.features.reduce((sum, feature) => sum + feature.total_count, 0);
+    const completedAcids = features.features.reduce((sum, feature) => sum + feature.completed_count, 0);
+    const implPct = totalAcids > 0 ? Math.round(completedAcids / totalAcids * 100) : 0;
+
+    const implIndicator = implHead.createSpan({ cls: "ts-acai-impl-indicator" });
+    implIndicator.setText(impl.implementation_name);
+    implIndicator.addClass(`ts-acai-impl-indicator--${pctClass(implPct)}`);
+    implHead.createSpan({ cls: "ts-acai-impl-pct", text: `${implPct}%` });
+
+    const featureList = implSection.createDiv({ cls: "ts-acai-list" });
+    for (const feat of features.features) {
+      this.renderAcaiFeatureRow(featureList, {
+        product,
+        implementation: impl.implementation_name,
+        feature: feat.feature_name,
+        entry: feat,
+        baseUrl,
+        token,
+      });
     }
   }
 
@@ -1775,6 +1813,7 @@ export class DashboardView extends ItemView {
     this.acaiContextCache.clear();
     this.acaiContextRequests.clear();
     this.acaiExpandedKeys.clear();
+    this.acaiCompletedDisclosureKeys.clear();
   }
 
   private refreshAcaiTrackerSection() {
