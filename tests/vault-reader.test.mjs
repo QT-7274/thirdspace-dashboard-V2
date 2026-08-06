@@ -247,6 +247,96 @@ test("project-centered-dashboard.TODO_FORMAT.4 syncs project assignment to task 
   assert.match(writes.get(today.path), /#project\/thirdspace-dashboard/);
 });
 
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 updates the unique legacy project match", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const contents = new Map([
+    [today.path, [
+      "## 今日Todo",
+      "- [ ] 重复任务 #工作 #project/alpha",
+      "- [ ] 重复任务 #工作 #project/beta",
+    ].join("\n")],
+  ]);
+  const writes = new Map();
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async (file, md) => { writes.set(file.path, md); contents.set(file.path, md); },
+    },
+  };
+
+  assert.equal(
+    await updateTodoProject(app, {
+      text: "重复任务",
+      done: false,
+      tags: ["工作"],
+      projectId: "beta",
+    }, "gamma"),
+    true,
+  );
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/alpha/);
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/gamma/);
+});
+
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 rejects ambiguous legacy project matches without modifying markdown", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const original = [
+    "## 今日Todo",
+    "- [ ] 无法区分的任务 #工作",
+    "- [ ] 无法区分的任务 #工作",
+  ].join("\n");
+  const contents = new Map([[today.path, original]]);
+  let modifyCalls = 0;
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async () => { modifyCalls += 1; },
+    },
+  };
+
+  await assert.rejects(
+    updateTodoProject(app, { text: "无法区分的任务", done: false, tags: ["工作"] }, "gamma"),
+    /multiple matching legacy todos/i,
+  );
+  assert.equal(modifyCalls, 0);
+  assert.equal(contents.get(today.path), original);
+});
+
+test("dashboard-experience-refinement.PROJECT_ASSIGNMENT.2 ignores stable-id todos during legacy matching", async () => {
+  const { updateTodoProject, getTodayWorklogPath } = await loadVaultReader();
+  const today = { path: getTodayWorklogPath() };
+  const contents = new Map([
+    [today.path, [
+      "## 今日Todo",
+      "- [ ] 重复任务 #工作 #project/beta",
+      "- [ ] 重复任务 #工作 #project/beta ^ts-stable-1",
+    ].join("\n")],
+  ]);
+  const writes = new Map();
+  const app = {
+    vault: {
+      getAbstractFileByPath: path => path === today.path ? today : null,
+      read: async file => contents.get(file.path),
+      modify: async (file, md) => { writes.set(file.path, md); contents.set(file.path, md); },
+    },
+  };
+
+  assert.equal(
+    await updateTodoProject(app, {
+      text: "重复任务",
+      done: false,
+      tags: ["工作"],
+      projectId: "beta",
+    }, "gamma"),
+    true,
+  );
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/gamma$/m);
+  assert.match(writes.get(today.path), /重复任务 #工作 #project\/beta \^ts-stable-1/);
+});
+
 test("setTaskPoolTodoDoneInMd updates the linked source task by id", async () => {
   const { setTaskPoolTodoDoneInMd } = await loadVaultReader();
   const md = "## 本周\n- [ ] 注册 linkin #学习 #task/scope-week ^ts-week-1\n";

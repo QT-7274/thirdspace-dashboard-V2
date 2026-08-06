@@ -447,6 +447,19 @@ function todoMatchesItem(parsed: Omit<TodoItem, "done">, item: TodoItem): boolea
   return parsed.tags.every(t => item.tags.includes(t));
 }
 
+function legacyTodoProjectMatchesItem(
+  parsed: Omit<TodoItem, "done">,
+  item: TodoItem | ScopedTodoItem,
+): boolean {
+  if (parsed.taskId) return false;
+  if (parsed.text !== item.text) return false;
+  if ((parsed.dueDate ?? "") !== (item.dueDate ?? "")) return false;
+  if ((parsed.periodRange ?? "") !== (item.periodRange ?? "")) return false;
+  if (parsed.tags.length !== item.tags.length) return false;
+  if (!parsed.tags.every(t => item.tags.includes(t))) return false;
+  return parsed.projectId === item.projectId;
+}
+
 // ── Overdue detection ────────────────────────────────────────
 // todo-overdue-and-edge-cases.TIMEZONE.1
 function getTodayStr(): string { return localDateStr(new Date()); }
@@ -768,14 +781,22 @@ export function setTodoProjectInMd(md: string, taskId: string, projectId?: strin
 
 function setTodoProjectForItemInMd(md: string, item: TodoItem | ScopedTodoItem, projectId?: string): string {
   const lines = md.split("\n");
+  const matchingLineIndexes: number[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(/^- \[( |x)\]\s+(.+)/);
     if (!match) continue;
     const parsed = parseTodoBody(match[2]);
-    if (!todoMatchesItem(parsed, item)) continue;
-    lines[i] = replaceProjectTagsInTodoLine(lines[i], projectId);
-    break;
+    if (legacyTodoProjectMatchesItem(parsed, item)) matchingLineIndexes.push(i);
   }
+
+  // dashboard-experience-refinement.PROJECT_ASSIGNMENT.2
+  if (matchingLineIndexes.length > 1) throw new Error("Multiple matching legacy todos");
+  if (matchingLineIndexes.length === 1) {
+    const lineIndex = matchingLineIndexes[0];
+    lines[lineIndex] = replaceProjectTagsInTodoLine(lines[lineIndex], projectId);
+  }
+
   return lines.join("\n");
 }
 

@@ -21,6 +21,7 @@ import { buildSnakeCells, type SnakeCell } from "./data/worklog-parser";
 import { renderSnakeHeatmap, type SnakeRouteCache } from "./components/snake-heatmap";
 import { shouldSubmitOnEnter } from "./utils/keyboard";
 import { DEFAULT_SCOPED_TASK_BATCH_SIZE, getRemainingCount, getVisibleCount } from "./utils/pagination";
+import { deduplicateProjectTodos } from "./utils/project-todos";
 import {
   fetchImplementationFeatures, fetchImplementations, fetchFeatureContext, patchFeatureStates,
   ACAI_STATE_OPTIONS,
@@ -602,16 +603,10 @@ export class DashboardView extends ItemView {
 
   private getProjectTodoItems(project: ProjectItem, todos: TodoItem[], scopedTodos: ScopedTodoItem[]): ProjectTodo[] {
     // project-centered-dashboard.TIME_VIEWS.2
-    const seen = new Set<string>();
-    const result: ProjectTodo[] = [];
-    for (const item of [...todos, ...scopedTodos]) {
-      if (item.projectId !== project.id) continue;
-      const key = item.taskId ?? `${item.text}|${item.dueDate ?? ""}|${item.periodRange ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(item);
-    }
-    return result;
+    // project-centered-dashboard.PROJECT_CENTER.6
+    return deduplicateProjectTodos(
+      [...todos, ...scopedTodos].filter(item => item.projectId === project.id),
+    );
   }
 
   private getProjectInspirations(project: ProjectItem, inspirations: InspirationItem[]): InspirationItem[] {

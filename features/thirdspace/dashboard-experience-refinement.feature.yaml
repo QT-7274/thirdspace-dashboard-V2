@@ -33,6 +33,7 @@ components:
   PROJECT_ASSIGNMENT:
     requirements:
       1: 已归属 Todo 显示可编辑项目 Chip；未归属 Todo 只在悬停或键盘焦点时显示项目分配触发器。
+      2: 没有 taskId 的 Todo 修改项目归属时，只有唯一匹配的源任务才允许写入；多个 legacy 候选时保持源文件不变并报告失败。
 
   EXPANDABLE_LISTS:
     requirements:
