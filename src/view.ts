@@ -1087,7 +1087,8 @@ export class DashboardView extends ItemView {
         }
       }
       await toggleTodoInWorklog(this.app, item, targetDone);
-      if (item.taskId) await this.render();
+      this.carryOverCache = null;
+      if (item.taskId || targetDone) await this.render();
     });
 
     // 单击行 = 打开文件（detail >= 2 时忽略，让 dblclick 接管）
@@ -1964,6 +1965,7 @@ export class DashboardView extends ItemView {
 
   /** 局部刷新 todo card，不触发全页重绘 */
   private async refreshTodoSection() {
+    this.carryOverCache = null;
     const todoCard = this.containerEl.querySelector<HTMLElement>(".ts-todo-card");
     if (!todoCard) { await this.render(); return; }
 

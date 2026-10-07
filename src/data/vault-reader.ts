@@ -443,8 +443,9 @@ function todoMatchesItem(parsed: Omit<TodoItem, "done">, item: TodoItem): boolea
   if (parsed.text !== item.text) return false;
   if ((parsed.dueDate ?? "") !== (item.dueDate ?? "")) return false;
   if ((parsed.periodRange ?? "") !== (item.periodRange ?? "")) return false;
-  if (parsed.tags.length !== item.tags.length) return false;
-  return parsed.tags.every(t => item.tags.includes(t));
+  const itemTags = item.tags ?? [];
+  if (parsed.tags.length !== itemTags.length) return false;
+  return parsed.tags.every(t => itemTags.includes(t));
 }
 
 function legacyTodoProjectMatchesItem(
@@ -842,7 +843,7 @@ export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean,
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^- \[( |x)\] (.+)/);
     if (!m) continue;
-    if (parseTodoBody(m[2]).text !== item.text) continue;
+    if (!todoMatchesItem(parseTodoBody(m[2]), item)) continue;
 
     if (targetDone) {
       const withoutDate = lines[i].replace(/ ✅ \d{4}-\d{2}-\d{2}/g, "");
@@ -855,6 +856,29 @@ export function setTodoDoneInMd(md: string, item: TodoItem, targetDone: boolean,
   return lines.join("\n");
 }
 
+// todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.5
+async function syncCarryOverTodoDone(app: App, item: TodoItem, targetDone: boolean, doneDate: string): Promise<void> {
+  const todayStr = localDateStr(new Date()).replace(/-/g, "");
+  const candidates = app.vault.getMarkdownFiles()
+    .filter(f =>
+      f.path.startsWith("02-日记/工作日志/") &&
+      !f.path.includes(todayStr)
+    )
+    .sort((a, b) => b.basename.localeCompare(a.basename))
+    .slice(0, 5);
+
+  for (const f of candidates) {
+    try {
+      const md = await app.vault.read(f);
+      const next = setTodoDoneInMd(md, item, targetDone, doneDate);
+      if (next !== md) {
+        await app.vault.modify(f, next);
+        return;
+      }
+    } catch { continue; }
+  }
+}
+
 export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone = !item.done): Promise<void> {
   const path = getTodayWorklogPath();
   const f = app.vault.getAbstractFileByPath(path) as TFile | null;
@@ -865,6 +889,7 @@ export async function toggleTodoInWorklog(app: App, item: TodoItem, targetDone =
   if (next !== md) {
     await app.vault.modify(f, next);
     if (item.taskId) await syncTaskPoolTodoDone(app, item.taskId, targetDone, today);
+    else await syncCarryOverTodoDone(app, item, targetDone, today);
   }
 }
 

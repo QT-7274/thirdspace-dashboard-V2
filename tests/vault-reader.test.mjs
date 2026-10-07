@@ -365,6 +365,38 @@ test("toggleTodoInWorklog skips vault.modify when no todo matches", async () => 
   assert.equal(modifyCalls, 0);
 });
 
+test("todo-overdue-and-edge-cases.CROSS_DAY_CARRYOVER.5 toggleTodoInWorklog completes matching carry-over source todo", async () => {
+  const { toggleTodoInWorklog, getTodayWorklogPath, localDateCompact } = await loadVaultReader();
+  const todayCompact = localDateCompact(new Date());
+  const todayFile = {
+    path: getTodayWorklogPath(),
+    basename: `${todayCompact}_工作日志`,
+  };
+  const previousFile = {
+    path: "02-日记/工作日志/20260625_工作日志_周四.md",
+    basename: "20260625_工作日志_周四",
+  };
+  const files = new Map([
+    [todayFile.path, "## 今日Todo\n- [ ] 昨天没做完的事\n"],
+    [previousFile.path, "## 今日Todo\n- [ ] 昨天没做完的事\n"],
+  ]);
+  const app = {
+    vault: {
+      getAbstractFileByPath: (path) => path === todayFile.path ? todayFile : null,
+      getMarkdownFiles: () => [todayFile, previousFile],
+      read: async (file) => files.get(file.path),
+      modify: async (file, md) => { files.set(file.path, md); },
+    },
+  };
+
+  await toggleTodoInWorklog(app, { text: "昨天没做完的事", done: false, tags: [] }, true);
+
+  assert.equal(
+    files.get(previousFile.path),
+    "## 今日Todo\n- [x] 昨天没做完的事 ✅ " + new Date().toLocaleDateString("sv-SE") + "\n",
+  );
+});
+
 // ── Overdue & edge case tests ────────────────────────────────
 
 test("todo-overdue-and-edge-cases.OVERDUE_DETECTION.1 isTodoOverdue detects past dueDate", async () => {

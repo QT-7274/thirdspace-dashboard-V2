@@ -23,6 +23,7 @@ components:
       2: When carry-over todos exist, a "昨日遗留" card is rendered showing them with an "加入今日" action.
       3: Carry-over todo rows are visually distinct from today's todos.
       4: Adding a carry-over todo to today copies it into today's worklog without modifying the source worklog.
+      5: 完成从昨日遗留复制到今日的 todo 时，匹配的来源 worklog todo 状态同步为完成。
 
   TODO_DELETE:
     requirements:
